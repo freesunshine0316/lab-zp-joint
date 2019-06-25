@@ -1,0 +1,20 @@
+{
+    "train_path": "data/zhidao_train_new.json",
+    "dev_path": "data/zhidao_dev_new.json",
+    "test_path": "data/zhidao_test_new.json",
+    "suffix": "bert_base_chn",
+    "log_dir": "logs",
+    "bert_model": "bert-base-chinese",
+    "pro_mapping": "data/pro_dict_rev.json",
+
+    "batch_size": 10,
+    "num_epochs": 10,
+    "grad_accum_steps": 1,
+    "learning_rate": 1e-5,
+    "warmup_proportion": 0.1,
+
+    "char2word": "last",
+
+    "config_path": "config.json",
+    "generate_config": false
+}
