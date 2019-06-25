@@ -3,6 +3,8 @@ import os, sys, json, codecs
 import argparse
 import numpy as np
 import time
+import random
+
 import torch
 import torch.nn as nn
 from tqdm import tqdm, trange
@@ -95,7 +97,7 @@ def main():
     pro_mapping = json.load(open(FLAGS.pro_mapping, 'r'))
     print('Number of predefined pronouns: {}, they are: {}'.format(len(pro_mapping), pro_mapping.values()))
 
-    # load data, TODO: also load test data
+    # load data
     train_features = zp_datastream.load_and_extract_features(FLAGS.train_path, tokenizer,
             data_type="recovery", char2word_strategy="last")
     dev_features = zp_datastream.load_and_extract_features(FLAGS.dev_path, tokenizer,
@@ -106,11 +108,11 @@ def main():
     # make batches
     print('Making batches')
     train_batches = zp_datastream.make_recovery_batch(train_features, FLAGS.batch_size,
-            is_sort=True, is_random=False)
+            is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
     dev_batches = zp_datastream.make_recovery_batch(dev_features, FLAGS.batch_size,
-            is_sort=True, is_random=False)
+            is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
     test_batches = zp_datastream.make_recovery_batch(test_features, FLAGS.batch_size,
-            is_sort=True, is_random=False)
+            is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
 
     print("Num training examples = {}".format(len(train_features)))
     print("Num training batches = {}".format(len(train_batches)))
@@ -145,11 +147,15 @@ def main():
 
     best_f1 = 0.0
     global_step = 0
+    train_batch_ids = list(range(0, len(train_batches)))
     model.train()
     for _ in range(FLAGS.num_epochs):
         train_loss = 0
         epoch_start = time.time()
-        for ori_batch in train_batches:
+        if FLAGS.is_shuffle:
+            random.shuffle(train_batch_ids)
+        for id in train_batch_ids:
+            ori_batch = train_batches[id]
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
             input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask = \
@@ -180,7 +186,6 @@ def main():
                 sys.stdout.flush()
 
         print('\nTraining loss: %.2f, time: %.3f sec' % (train_loss, time.time()-epoch_start))
-        print('=============')
         detection_f1, recovery_f1 = dev_eval(model, device, dev_batches)
         if recovery_f1 > best_f1:
             print('Saving weights, F1 {} (prev_best) < {} (cur)'.format(best_f1, recovery_f1))
@@ -188,7 +193,6 @@ def main():
             save_model(model, path_prefix)
         print('-------------')
         dev_eval(model, device, test_batches)
-        print('-------------')
         print('=============')
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

@@ -7,13 +7,16 @@
     "bert_model": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
 
+    "is_shuffle": true,
+    "is_sort": true,
+
     "batch_size": 10,
     "num_epochs": 10,
     "grad_accum_steps": 1,
-    "learning_rate": 1e-5,
+    "learning_rate": 8e-6,
     "warmup_proportion": 0.1,
 
-    "char2word": "last",
+    "char2word": "sum",
 
     "config_path": "config.json",
     "generate_config": false

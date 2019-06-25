@@ -62,10 +62,10 @@ def extract_recovery(data, features, sent_id_mapping):
 
 
 # (input_ids, input_char2word, input_zp, input_zp_cid)
-def make_recovery_batch(features, batch_size, is_sort=True, is_random=False):
+def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
     if is_sort:
         features.sort(key=lambda x: len(x['input_ids']))
-    elif is_random:
+    elif is_shuffle:
         random.shuffle(features)
     N = 0
     batches = []
