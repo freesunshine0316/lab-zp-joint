@@ -37,7 +37,7 @@ def calc_seq_f1(outputs, refs):
 
 def copy_batch(src, tgt, lens):
     for i, l in enumerate(lens):
-        tgt.append(src[i][1:l])
+        tgt.append(src[i][1:l-1])
 
 
 def dev_eval(model, device, dev_batches):
@@ -123,7 +123,7 @@ def main():
 
     # create model
     print('Compiling model')
-    model = zp_model.BertZeroProMTL.from_pretrained(FLAGS.bert_model, #cache_dir=cache_dir,
+    model = zp_model.BertZeroProMTL.from_pretrained(FLAGS.bert_model,
             char2word=FLAGS.char2word, pro_num=len(pro_mapping))
     model.to(device)
     if n_gpu > 1:
@@ -140,6 +140,7 @@ def main():
     grouped_params = [
             {'params': [p for n, p in named_params if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
             {'params': [p for n, p in named_params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}]
+    #grouped_params = [{'params': [p for n, p in named_params], 'weight_decay': 0.0}]
     optimizer = BertAdam(grouped_params,
             lr=FLAGS.learning_rate,
             warmup=FLAGS.warmup_proportion,
