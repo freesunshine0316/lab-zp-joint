@@ -2,10 +2,10 @@
     "train_path": "data/zhidao_train_new.json",
     "dev_path": "data/zhidao_dev_new.json",
     "test_path": "data/zhidao_test_new.json",
-    "suffix": "bert_char",
-    "model_type": "bert_char",
+    "suffix": "bert_word",
     "log_dir": "logs",
-    "bert_type": "bert-base-chinese",
+    "model_type": "bert_word",
+    "pretrained_path": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
 
     "is_shuffle": false,

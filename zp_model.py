@@ -7,15 +7,15 @@ from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
 from span_classifier import SSAClassifier
 
 
-class ZPBert(BertPreTrainedModel):
-    def __init__(self, config, char2word="mean", pro_num=-1):
-        super(ZPBert, self).__init__(config)
+class BertZP(BertPreTrainedModel):
+    def __init__(self, config, char2word, pro_num):
+        super(BertZP, self).__init__(config)
         assert pro_num > 0
         self.pro_num = pro_num
         self.char2word = char2word
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        #self.resolution_classifier = SSAClassifier()
+        self.resolution_classifier = SSAClassifier()
         self.detection_classifier = nn.Linear(config.hidden_size, 2)
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
@@ -38,7 +38,7 @@ class ZPBert(BertPreTrainedModel):
         word_repre = word_repre.view(batch_size, wordseq_num, word_len, hidden_dim)
         word_repre = word_repre * input_char2word_mask.unsqueeze(-1)
         # word_repre: [batch, wordseq, dim]
-        word_repre = word_repre.mean(dim=2) if self.char2word == 'mean' else word_repre.sum(dim=2)
+        word_repre = word_repre.sum(dim=2) if self.char2word == 'sum' else word_repre.mean(dim=2)
         #if self.char2word == 'mean':
         #    word_repre = word_repre.mean(dim=2)
         #elif self.char2word == 'sum':

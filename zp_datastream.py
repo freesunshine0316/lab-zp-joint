@@ -4,8 +4,8 @@ import numpy as np
 import torch
 
 
-def load_and_extract_features(path, tokenizer, data_type="recovery", char2word_strategy="last"):
-    print('Data type: {}, char2word_strategy: {}'.format(data_type, char2word_strategy))
+def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recovery"):
+    print('Data type: {}, char2word: {}'.format(data_type, char2word))
     data = json.load(open(path, 'r'))
 
     features = []
@@ -22,14 +22,14 @@ def load_and_extract_features(path, tokenizer, data_type="recovery", char2word_s
         input_ids = tokenizer.convert_tokens_to_ids(sent_bert_toks) # [seq]
         input_char2word = [] # [wordseq, wordlen OR 1]
         for idxs in sent_bert_idxs:
-            if char2word_strategy == 'first':
+            if char2word == 'first':
                 input_char2word.append(idxs[:1])
-            elif char2word_strategy == 'last':
+            elif char2word == 'last':
                 input_char2word.append(idxs[-1:])
-            elif char2word_strategy in ('mean', 'sum', ):
+            elif char2word in ('mean', 'sum', ):
                 input_char2word.append(idxs)
             else:
-                assert False, 'Unsupported char2word_strategy: ' + char2word_strategy
+                assert False, 'Unsupported char2word: ' + char2word
         features.append({'input_ids':input_ids, 'input_char2word':input_char2word})
     print('OOV rate: {}, {}/{}'.format(right/total, right, total))
 

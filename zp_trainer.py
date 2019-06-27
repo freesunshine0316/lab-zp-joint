@@ -13,12 +13,11 @@ from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
 
 import config_utils
-import zp_datastream, zp_model
 
 FLAGS = None
 
 
-def calc_seq_f1(outputs, refs):
+def calc_f1(outputs, refs):
     n_out, n_ref, n_both = 0.0, 0.0, 0.0
     for i in range(len(outputs)):
         for j in range(len(outputs[i])):
@@ -40,7 +39,7 @@ def copy_batch(src, tgt, lens):
         tgt.append(src[i][1:l-1])
 
 
-def dev_eval(model, device, dev_batches):
+def dev_eval(model, model_type, dev_batches, device):
     model.eval()
     print('Evaluating on devset')
     dev_loss = 0.0
@@ -51,16 +50,10 @@ def dev_eval(model, device, dev_batches):
         # data preparing
         batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                 for k, v in ori_batch.items()}
-        input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask = \
-                batch['input_ids'], batch['input_mask'], batch['input_wordmask'], \
-                batch['input_char2word'], batch['input_char2word_mask']
-        input_zp, input_zp_cid, input_zp_span, batch_type = \
-                batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
-        # model execution
-        loss, detection_out, recovery_out = model(input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask,
-                input_zp, input_zp_span, input_zp_cid, batch_type)
+        loss, detection_out, recovery_out = forward_step(model, model_type, batch)
         dev_loss += loss.item()
         # copy results
+        seq_mask
         sequence_lengths = input_wordmask.sum(dim=-1).long().cpu().tolist() # [batch]
         copy_batch(input_zp.cpu().tolist(), refs['detection'], sequence_lengths)
         copy_batch(input_zp_cid.cpu().tolist(), refs['recovery'], sequence_lengths)
@@ -68,12 +61,35 @@ def dev_eval(model, device, dev_batches):
         copy_batch(recovery_out.cpu().tolist(), outputs['recovery'], sequence_lengths)
     # final eval
     print('Dev loss: %.2f, time: %.3f sec' % (dev_loss, time.time()-dev_start))
-    det_pr, det_rc, det_f1 = calc_seq_f1(outputs['detection'], refs['detection'])
+    det_pr, det_rc, det_f1 = calc_f1(outputs['detection'], refs['detection'])
     print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
-    rec_pr, rec_rc, rec_f1 = calc_seq_f1(outputs['recovery'], refs['recovery'])
+    rec_pr, rec_rc, rec_f1 = calc_f1(outputs['recovery'], refs['recovery'])
     print('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
     model.train()
     return det_f1, rec_f1
+
+
+def forward_step(model, model_type, batch):
+    if model_type == 'bert_word':
+        input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask = \
+                batch['input_ids'], batch['input_mask'], batch['input_wordmask'], \
+                batch['input_char2word'], batch['input_char2word_mask']
+        input_zp, input_zp_cid, input_zp_span, batch_type = \
+                batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
+
+        loss, out1, out2 = model(input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask,
+                input_zp, input_zp_span, input_zp_cid, batch_type)
+    elif model_type == 'bert_char':
+        input_ids, input_mask, input_decision_mask = \
+                batch['input_ids'], batch['input_mask'], batch['input_decision_mask']
+        input_zp, input_zp_cid, input_zp_span, batch_type = \
+                batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
+
+        loss, out1, out2 = model(input_ids, input_mask, input_decision_mask,
+                input_zp, input_zp_span, input_zp_cid, batch_type)
+    else:
+        assert False, "model_type '{}' not supported".format(model_type)
+    return loss, out1, out2
 
 
 def main():
@@ -93,17 +109,20 @@ def main():
     n_gpu = torch.cuda.device_count()
     print('device: {}, n_gpu: {}, grad_accum_steps: {}'.format(device, n_gpu, FLAGS.grad_accum_steps))
 
-    tokenizer = BertTokenizer.from_pretrained(FLAGS.bert_model)
+    tokenizer = None
+    if 'bert' in FLAGS.pretrained_path:
+        tokenizer = BertTokenizer.from_pretrained(FLAGS.pretrained_path)
+
     pro_mapping = json.load(open(FLAGS.pro_mapping, 'r'))
     print('Number of predefined pronouns: {}, they are: {}'.format(len(pro_mapping), pro_mapping.values()))
 
     # load data
     train_features = zp_datastream.load_and_extract_features(FLAGS.train_path, tokenizer,
-            data_type="recovery", char2word_strategy="last")
+            char2word=FLAGS.char2word, data_type="recovery")
     dev_features = zp_datastream.load_and_extract_features(FLAGS.dev_path, tokenizer,
-            data_type="recovery", char2word_strategy="last")
+            char2word=FLAGS.char2word, data_type="recovery")
     test_features = zp_datastream.load_and_extract_features(FLAGS.test_path, tokenizer,
-            data_type="recovery", char2word_strategy="last")
+            char2word=FLAGS.char2word, data_type="recovery")
 
     # make batches
     print('Making batches')
@@ -123,7 +142,7 @@ def main():
 
     # create model
     print('Compiling model')
-    model = zp_model.BertZeroProMTL.from_pretrained(FLAGS.bert_model,
+    model = zp_model.BertZP.from_pretrained(FLAGS.pretrained_path,
             char2word=FLAGS.char2word, pro_num=len(pro_mapping))
     model.to(device)
     if n_gpu > 1:
@@ -159,14 +178,8 @@ def main():
             ori_batch = train_batches[id]
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
-            input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask = \
-                    batch['input_ids'], batch['input_mask'], batch['input_wordmask'], \
-                    batch['input_char2word'], batch['input_char2word_mask']
-            input_zp, input_zp_cid, input_zp_span, batch_type = \
-                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
 
-            loss, _, _ = model(input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask,
-                    input_zp, input_zp_span, input_zp_cid, batch_type)
+            loss, _, _ = forward_step(model, FLAGS.model_type, batch)
 
             if n_gpu > 1:
                 loss = loss.mean()
@@ -187,13 +200,13 @@ def main():
                 sys.stdout.flush()
 
         print('\nTraining loss: %.2f, time: %.3f sec' % (train_loss, time.time()-epoch_start))
-        detection_f1, recovery_f1 = dev_eval(model, device, dev_batches)
+        detection_f1, recovery_f1 = dev_eval(model, FLAGS.model_type, dev_batches, device)
         if recovery_f1 > best_f1:
             print('Saving weights, F1 {} (prev_best) < {} (cur)'.format(best_f1, recovery_f1))
             best_f1 = recovery_f1
             save_model(model, path_prefix)
         print('-------------')
-        dev_eval(model, device, test_batches)
+        dev_eval(model, FLAGS.model_type, test_batches, device)
         print('=============')
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -207,10 +220,6 @@ def save_model(model, path_prefix):
 
     torch.save(model_to_save.state_dict(), model_path)
     model_to_save.config.to_json_file(config_path)
-
-
-def enrich_options():
-    pass
 
 
 if __name__ == '__main__':
@@ -227,8 +236,16 @@ if __name__ == '__main__':
         print('Loading hyperparameters from ' + FLAGS.config_path)
         FLAGS = config_utils.load_config(FLAGS.config_path)
 
-    enrich_options()
     assert type(FLAGS.grad_accum_steps) == int and FLAGS.grad_accum_steps >= 1
+
+    if FLAGS.model_type == 'bert_word':
+        import zp_datastream
+        import zp_model
+    elif FLAGS.model_type == 'bert_char':
+        import zp_datastream_char as zp_datastream
+        import zp_model_char as zp_model
+    else:
+        assert False, "model_type '{}' not supported".format(FLAGS.model_type)
 
     main()
 
