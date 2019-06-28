@@ -17,54 +17,92 @@ import config_utils
 FLAGS = None
 
 
-def calc_f1(outputs, refs):
-    n_out, n_ref, n_both = 0.0, 0.0, 0.0
-    for i in range(len(outputs)):
-        for j in range(len(outputs[i])):
-            if outputs[i][j] > 0.0:
-                n_out += 1.0
-            if refs[i][j] > 0.0:
-                n_ref += 1.0
-                if outputs[i][j] == refs[i][j]:
-                    n_both += 1.0
-    #print('{} {} {}'.format(n_both, n_out, n_ref))
+def calc_f1(n_out, n_ref, n_both):
     pr = n_both/n_out if n_out > 0.0 else 0.0
     rc = n_both/n_ref if n_ref > 0.0 else 0.0
     f1 = 2.0*pr*rc/(pr+rc) if pr > 0.0 and rc > 0.0 else 0.0
     return pr, rc, f1
 
 
-def copy_batch(src, tgt, lens):
-    for i, l in enumerate(lens):
-        tgt.append(src[i][1:l-1])
+def add_counts(out, ref, counts):
+    assert type(out) in (int, list)
+    assert type(ref) in (int, list)
+    if type(out) == int:
+        out = [out,]
+    if type(ref) == int:
+        ref = [ref,]
+    if sum(out) != 0:
+        counts[1] += 1.0
+    if sum(ref) != 0:
+        counts[2] += 1.0
+        if out == ref:
+            counts[0] += 1.0
 
 
-def dev_eval(model, model_type, dev_batches, device):
+def add_counts_span(out, ref, counts):
+    pass
+
+
+def dev_eval(model, model_type, dev_batches, device, log_file):
     model.eval()
-    print('Evaluating on devset')
+    data_type = dev_batches[0]['type']
+    assert data_type in ('recovery', 'resolution')
+    print('Evaluating on devset, type: {}'.format(data_type))
+    N = 0
     dev_loss = 0.0
+    counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)], 'resolution':[0.0 for _ in range(3)]}
+    outputs = {'detection':[], 'recovery':[], 'resolution':[]}
     dev_start = time.time()
-    refs = {'detection':[], 'resolution':[], 'recovery':[]}
-    outputs = {'detection':[], 'resolution':[], 'recovery':[]}
     for step, ori_batch in enumerate(dev_batches):
-        # data preparing
+        # execution
         batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                 for k, v in ori_batch.items()}
-        loss, detection_out, recovery_out = forward_step(model, model_type, batch)
+        loss, detection_out, tmp_out = forward_step(model,
+                model_type, batch)
+        input_zp, input_zp_cid, input_zp_span = \
+                batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span']
+        input_zp, detection_out = input_zp.cpu().tolist(), detection_out.cpu().tolist()
+        if data_type == 'recovery':
+            input_zp_cid = input_zp_cid.cpu().tolist()
+            recovery_out = tmp_out.cpu().tolist()
+        else:
+            input_zp_span = input_zp_span.cpu().tolist()
+            resolution_out = tmp_out.cpu().tolist()
         dev_loss += loss.item()
-        # copy results
-        seq_mask
-        sequence_lengths = input_wordmask.sum(dim=-1).long().cpu().tolist() # [batch]
-        copy_batch(input_zp.cpu().tolist(), refs['detection'], sequence_lengths)
-        copy_batch(input_zp_cid.cpu().tolist(), refs['recovery'], sequence_lengths)
-        copy_batch(detection_out.cpu().tolist(), outputs['detection'], sequence_lengths)
-        copy_batch(recovery_out.cpu().tolist(), outputs['recovery'], sequence_lengths)
-    # final eval
+        # generating results
+        if model_type == 'bert_char': # if char-level model
+            mask = batch['input_decision_mask']
+            lens = batch['input_mask'].sum(dim=-1).long()
+        else:
+            mask = batch['input_wordmask']
+            lens = batch['input_wordmask'].sum(dim=-1).long()
+        B = list(lens.size())[0]
+        for i in range(B):
+            for j in range(1, lens[i]-1): # [CLS] A B C ... [SEP]
+                # for bert-char model, only consider word-boundary positions
+                # for word models, every position within 'input_wordmask' need to be considered
+                if mask[i,j] == 0.0:
+                    continue
+                add_counts(out=detection_out[i][j], ref=input_zp[i][j],
+                        counts=counts['detection'])
+                if data_type == 'recovery':
+                    add_counts(out=recovery_out[i][j], ref=input_zp_cid[i][j],
+                            counts=counts['recovery'])
+                else:
+                    add_counts_span(out=resolution_out[i][j], ref=input_zp_span[i][j],
+                            counts=counts['resolution'])
+            N += B
+    # f1 eval
     print('Dev loss: %.2f, time: %.3f sec' % (dev_loss, time.time()-dev_start))
-    det_pr, det_rc, det_f1 = calc_f1(outputs['detection'], refs['detection'])
+    det_pr, det_rc, det_f1 = calc_f1(n_out = counts['detection'][1],
+            n_ref = counts['detection'][2], n_both = counts['detection'][0])
     print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
-    rec_pr, rec_rc, rec_f1 = calc_f1(outputs['recovery'], refs['recovery'])
+    log_file.write('Detection F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*det_f1, 100*det_pr, 100*det_rc))
+    rec_pr, rec_rc, rec_f1 = calc_f1(n_out = counts['recovery'][1],
+            n_ref = counts['recovery'][2], n_both = counts['recovery'][0])
     print('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
+    log_file.write('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
+    log_file.flush()
     model.train()
     return det_f1, rec_f1
 
@@ -200,13 +238,13 @@ def main():
                 sys.stdout.flush()
 
         print('\nTraining loss: %.2f, time: %.3f sec' % (train_loss, time.time()-epoch_start))
-        detection_f1, recovery_f1 = dev_eval(model, FLAGS.model_type, dev_batches, device)
+        detection_f1, recovery_f1 = dev_eval(model, FLAGS.model_type, dev_batches, device, log_file)
         if recovery_f1 > best_f1:
             print('Saving weights, F1 {} (prev_best) < {} (cur)'.format(best_f1, recovery_f1))
             best_f1 = recovery_f1
             save_model(model, path_prefix)
         print('-------------')
-        dev_eval(model, FLAGS.model_type, test_batches, device)
+        dev_eval(model, FLAGS.model_type, test_batches, device, log_file)
         print('=============')
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

@@ -17,7 +17,7 @@
     "learning_rate": 8e-6,
     "warmup_proportion": 0.1,
 
-    "char2word": "sum",
+    "char2word": "first",
 
     "config_path": "config.json",
     "generate_config": false
