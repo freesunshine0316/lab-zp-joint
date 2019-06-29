@@ -244,8 +244,10 @@ def main():
             best_f1 = recovery_f1
             save_model(model, path_prefix)
         print('-------------')
+        log_file.write('-------------\n')
         dev_eval(model, FLAGS.model_type, test_batches, device, log_file)
         print('=============')
+        log_file.write('=============\n')
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
