@@ -112,6 +112,9 @@ class MultiHeadedAttention(nn.Module):
         #    aeq(q_len_ == q_len)
         # END CHECKS
 
+        assert head_count == 1, "We want a single attention distribution, \
+                not multiple ones for multiple heads"
+
         batch_size = key.size(0)
         dim_per_head = self.dim_per_head
         head_count = self.head_count
@@ -199,34 +202,36 @@ class MultiHeadedAttention(nn.Module):
             mask = mask.unsqueeze(1)  # [B, 1, 1, T_values]
             scores = scores.masked_fill(mask, -1e18)
 
-        # 3) Apply attention dropout and compute context vectors.
-        attn = self.softmax(scores).to(query.dtype)
-        drop_attn = self.dropout(attn)
+        return self.softmax(socres).view(batch_size, query_len, key_len)
 
-        context_original = torch.matmul(drop_attn, value)
+        ## 3) Apply attention dropout and compute context vectors.
+        #attn = self.softmax(scores).to(query.dtype)
+        #drop_attn = self.dropout(attn)
 
-        if self.max_relative_positions > 0 and type == "self":
-            context = unshape(context_original
-                              + relative_matmul(drop_attn,
-                                                relations_values,
-                                                False))
-        else:
-            context = unshape(context_original)
+        #context_original = torch.matmul(drop_attn, value)
 
-        output = self.final_linear(context)
-        # CHECK
-        # batch_, q_len_, d_ = output.size()
-        # aeq(q_len, q_len_)
-        # aeq(batch, batch_)
-        # aeq(d, d_)
+        #if self.max_relative_positions > 0 and type == "self":
+        #    context = unshape(context_original
+        #                      + relative_matmul(drop_attn,
+        #                                        relations_values,
+        #                                        False))
+        #else:
+        #    context = unshape(context_original)
 
-        # Return one attn
-        top_attn = attn \
-            .view(batch_size, head_count,
-                  query_len, key_len)[:, 0, :, :] \
-            .contiguous()
+        #output = self.final_linear(context)
+        ## CHECK
+        ## batch_, q_len_, d_ = output.size()
+        ## aeq(q_len, q_len_)
+        ## aeq(batch, batch_)
+        ## aeq(d, d_)
 
-        return output, top_attn
+        ## Return one attn
+        #top_attn = attn \
+        #    .view(batch_size, head_count,
+        #          query_len, key_len)[:, 0, :, :] \
+        #    .contiguous()
+
+        #return output, top_attn
 
     def update_dropout(self, dropout):
         self.dropout.p = dropout

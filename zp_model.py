@@ -4,7 +4,7 @@ import torch.nn as nn
 import os, sys, json, codecs
 
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
-from span_classifier import SSAClassifier
+from span_classifier import SpanClassifier
 
 
 class BertZP(BertPreTrainedModel):
@@ -15,7 +15,7 @@ class BertZP(BertPreTrainedModel):
         self.char2word = char2word
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.resolution_classifier = SSAClassifier()
+        self.resolution_classifier = SpanClassifier()
         self.detection_classifier = nn.Linear(config.hidden_size, 2)
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
@@ -38,14 +38,7 @@ class BertZP(BertPreTrainedModel):
         word_repre = word_repre.view(batch_size, wordseq_num, word_len, hidden_dim)
         word_repre = word_repre * input_char2word_mask.unsqueeze(-1)
         # word_repre: [batch, wordseq, dim]
-        word_repre = word_repre.sum(dim=2) if self.char2word == 'sum' else word_repre.mean(dim=2)
-        #if self.char2word == 'mean':
-        #    word_repre = word_repre.mean(dim=2)
-        #elif self.char2word == 'sum':
-        #    word_repre = word_repre.sum(dim=2)
-        #else:
-        #    assert word_repre.size()[2] == 1
-        #    word_repre = word_repre.squeeze(dim=2)
+        word_repre = word_repre.mean(dim=2) if self.char2word == 'mean' else word_repre.sum(dim=2)
 
         #detection
         detection_logits = self.detection_classifier(word_repre) # [batch, wordseq, 2]
@@ -55,8 +48,7 @@ class BertZP(BertPreTrainedModel):
 
         #resolution
         if batch_type == 'resolution':
-            assert False, 'under construction'
-            resolution_logits_st, resolution_logits_ed = self.resolution_classifier(word_repre)
+            res_st_dist, res_ed_dist = self.resolution_classifier(word_repre)
             tmp1 = word_mask.unsqueeze(1) # [batch, 1, wordseq]
             tmp2 = tmp1.transpose(1, 2) # [batch, wordseq, 1]
             square_mask = tmp2.matmul(tmp1) # [batch, wordseq, wordseq]

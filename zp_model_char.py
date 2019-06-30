@@ -4,7 +4,7 @@ import torch.nn as nn
 import os, sys, json, codecs
 
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
-from span_classifier import SSAClassifier
+from span_classifier import SpanClassifier
 
 
 class BertZP(BertPreTrainedModel):
@@ -15,7 +15,7 @@ class BertZP(BertPreTrainedModel):
         self.pro_num = pro_num
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.resolution_classifier = SSAClassifier()
+        self.resolution_classifier = SpanClassifier(config.hidden_size)
         self.detection_classifier = nn.Linear(config.hidden_size, 2)
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
