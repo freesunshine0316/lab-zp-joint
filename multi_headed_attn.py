@@ -112,7 +112,7 @@ class MultiHeadedAttention(nn.Module):
         #    aeq(q_len_ == q_len)
         # END CHECKS
 
-        assert head_count == 1, "We want a single attention distribution, \
+        assert self.head_count == 1, "We want a single attention distribution, \
                 not multiple ones for multiple heads"
 
         batch_size = key.size(0)
@@ -202,7 +202,7 @@ class MultiHeadedAttention(nn.Module):
             mask = mask.unsqueeze(1)  # [B, 1, 1, T_values]
             scores = scores.masked_fill(mask, -1e18)
 
-        return self.softmax(socres).view(batch_size, query_len, key_len)
+        return scores.view(batch_size, query_len, key_len)
 
         ## 3) Apply attention dropout and compute context vectors.
         #attn = self.softmax(scores).to(query.dtype)

@@ -61,6 +61,14 @@ def extract_recovery(data, features, sent_id_mapping):
         features[i]['input_zp_cid'][j] = pro_cid
 
 
+def make_batch(data_type, features, batch_size, is_sort=True, is_shuffle=False):
+    assert data_type in ("recovery", "resolution")
+    if data_type == "recovery":
+        return make_recovery_batch(features, batch_size, is_sort=is_sort, is_shuffle=is_shuffle)
+    else:
+        return make_resolution_batch(features, batch_size, is_sort=is_sort, is_shuffle=is_shuffle)
+
+
 # (input_ids, input_char2word, input_zp, input_zp_cid)
 def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
     if is_sort:

@@ -15,7 +15,7 @@ class BertZP(BertPreTrainedModel):
         self.char2word = char2word
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.resolution_classifier = SpanClassifier()
+        self.resolution_classifier = SpanClassifier(config.hidden_size)
         self.detection_classifier = nn.Linear(config.hidden_size, 2)
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
@@ -44,22 +44,32 @@ class BertZP(BertPreTrainedModel):
         detection_logits = self.detection_classifier(word_repre) # [batch, wordseq, 2]
         detection_outputs = detection_logits.argmax(dim=-1) # [batch, wordseq]
         if detection_refs is not None:
-            detection_loss = token_classification_loss(detection_logits, 2, detection_refs, word_mask)
+            detection_loss = classification_loss(detection_logits, detection_refs, word_mask, 2)
 
         #resolution
         if batch_type == 'resolution':
-            res_st_dist, res_ed_dist = self.resolution_classifier(word_repre)
-            tmp1 = word_mask.unsqueeze(1) # [batch, 1, wordseq]
-            tmp2 = tmp1.transpose(1, 2) # [batch, wordseq, 1]
-            square_mask = tmp2.matmul(tmp1) # [batch, wordseq, wordseq]
-            return
+            resolution_start_logits, resolution_end_logits = self.resolution_classifier(word_repre, word_mask)
+            resolution_start_outputs = resolution_start_logits.argmax(dim=-1)
+            resolution_end_outputs = resolution_end_logits.argmax(dim=-1)
+            resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, wordseq, 2]
+            if resolution_refs is not None:
+                #TODO: (1) char model part (2) data stream part
+                resolution_start_positions, resolution_end_positions = resolution_refs.split(1, dim=2)
+                resolution_start_positions = resolution_start_positions.squeeze(dim=2)
+                resolution_start_positions = resolution_start_positions.squeeze(dim=2)
+                resolution_loss = span_loss(resolution_start_logits, resolution_end_logits,
+                        resolution_start_positions, resolution_end_positions, word_mask)
+                assert detection_refs is not None
+                return detection_loss + resolution_loss, detection_outputs, resolution_outputs
+            else:
+                return None, detection_outputs, resolution_outputs
 
         #recovery
         if batch_type == 'recovery':
             recovery_logits = self.recovery_classifier(word_repre) # [batch, wordseq, pro_num]
             recovery_outputs = recovery_logits.argmax(dim=-1) # [batch, wordseq]
             if recovery_refs is not None:
-                recovery_loss = token_classification_loss(recovery_logits, self.pro_num, recovery_refs, word_mask)
+                recovery_loss = classification_loss(recovery_logits, recovery_refs, word_mask, self.pro_num)
                 assert detection_refs is not None
                 return detection_loss + recovery_loss, detection_outputs, recovery_outputs
             else:
@@ -68,18 +78,26 @@ class BertZP(BertPreTrainedModel):
         assert False, "batch_type need to be either 'recovery' or 'resolution'"
 
 
-def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, num_labels], scalar, [batch, 1]
+# logits: [batch, seq, num_labels]
+# refs: [batch, seq]
+# seq_masks: [batch, seq]
+def classification_loss(logits, refs, seq_masks, num_labels):
     loss_fct = nn.CrossEntropyLoss()
-    active_positions = masks.view(-1) == 1 # [batch*seq]
+    active_positions = seq_masks.view(-1) == 1 # [batch*seq]
     active_logits = logits.view(-1,num_labels)[active_positions] # [batch*seq(sub), num_labels]
     active_refs = refs.view(-1)[active_positions] # [batch*seq(sub)]
     return loss_fct(active_logits, active_refs)
 
 
-# start_logits: [batch, seq, seq, dim]
-# end_logits: [batch, seq, seq, dim]
+# start_logits: [batch, seq, seq]
+# end_logits: [batch, seq, seq]
 # start_positions: [batch, seq]
 # end_positions: [batch, seq]
-# self_mask: [batch, seq, seq]
-def span_loss(start_logits, end_logits, start_positions, end_positions, self_mask):
-    pass
+# seq_masks: [batch, seq]
+def span_loss(start_logits, end_logits, start_positions, end_positions, seq_masks):
+    num_labels = list(seq_masks.size())[1]
+    span_st_loss = classification_loss(start_logits, start_positions, seq_masks, num_labels)
+    span_ed_loss = classification_loss(end_logits, end_positions, seq_masks, num_labels)
+    return span_st_loss + span_ed_loss
+
+

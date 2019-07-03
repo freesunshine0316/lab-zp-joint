@@ -4,18 +4,25 @@ import torch.nn as nn
 from multi_headed_attn import MultiHeadedAttention
 
 
-# span classifier based on multi-head self-attention
+# span classifier based on self-attention
 class SpanClassifier(nn.Module):
     def __init__(self, hidden_dim):
         super(SpanClassifier, self).__init__()
         self.layer_norm = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.span_st_pred = MultiHeadedAttention(1, hidden_dim)
-        self.span_ed_pred = MultiHeadedAttention(1, hidden_dim)
+        self.span_st_attn = MultiHeadedAttention(1, hidden_dim)
+        self.span_ed_attn = MultiHeadedAttention(1, hidden_dim)
 
     def forward(self, repre, mask):
         repre_norm = self.layer_norm(repre)
-        span_st_dist = self.span_st_pred(repre_norm, repre_norm, repre_norm,
-                mask=mask, attn_type="self") # [batch, seq, seq]
-        span_ed_dist = self.span_ed_pred(repre_norm, repre_norm, repre_norm,
-                mask=mask, attn_type="self") # [batch, seq, seq]
-        return span_st_dist, span_ed_dist
+
+        tmp1 = mask.unsqueeze(1) # [batch, 1, seq]
+        tmp2 = tmp1.transpose(1, 2) # [batch, seq, 1]
+        square_mask = tmp2.matmul(tmp1).byte() # [batch, seq, seq]
+
+        span_st_logits = self.span_st_attn(repre_norm, repre_norm, repre_norm,
+                mask=square_mask, type="self") # [batch, seq, seq]
+        span_ed_logits = self.span_ed_attn(repre_norm, repre_norm, repre_norm,
+                mask=square_mask, type="self") # [batch, seq, seq]
+        return span_st_logits, span_ed_logits
+
+

@@ -24,6 +24,7 @@ def calc_f1(n_out, n_ref, n_both):
     return pr, rc, f1
 
 
+# [0,0] or 0 mean 'not applicable'
 def add_counts(out, ref, counts):
     assert type(out) in (int, list)
     assert type(ref) in (int, list)
@@ -40,7 +41,14 @@ def add_counts(out, ref, counts):
 
 
 def add_counts_span(out, ref, counts):
-    pass
+    assert type(out) in (list)
+    assert type(ref) in (list)
+    if sum(out) != 0:
+        counts[1] += out[1] - out[0]
+    if sum(ref) != 0:
+        counts[2] += ref[1] - ref[0]
+        intersect = set(range(out[0], out[1])) | set(range(ref[0], ref[1]))
+        counts[0] += len(intersect)
 
 
 def dev_eval(model, model_type, dev_batches, device, log_file):
@@ -50,8 +58,10 @@ def dev_eval(model, model_type, dev_batches, device, log_file):
     print('Evaluating on devset, type: {}'.format(data_type))
     N = 0
     dev_loss = 0.0
-    counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)], 'resolution':[0.0 for _ in range(3)]}
-    outputs = {'detection':[], 'recovery':[], 'resolution':[]}
+    counts = {'detection':[0.0 for _ in range(3)],
+            'recovery':[0.0 for _ in range(3)],
+            'resolution':[0.0 for _ in range(3)],
+            'resolution_span':[0.0 for _ in range(3)]}
     dev_start = time.time()
     for step, ori_batch in enumerate(dev_batches):
         # execution
@@ -89,8 +99,10 @@ def dev_eval(model, model_type, dev_batches, device, log_file):
                     add_counts(out=recovery_out[i][j], ref=input_zp_cid[i][j],
                             counts=counts['recovery'])
                 else:
-                    add_counts_span(out=resolution_out[i][j], ref=input_zp_span[i][j],
+                    add_counts(out=resolution_out[i][j], ref=input_zp_span[i][j],
                             counts=counts['resolution'])
+                    add_counts_span(out=resolution_out[i][j], ref=input_zp_span[i][j],
+                            counts=counts['resolution_span'])
             N += B
     # f1 eval
     print('Dev loss: %.2f, time: %.3f sec' % (dev_loss, time.time()-dev_start))
@@ -98,13 +110,19 @@ def dev_eval(model, model_type, dev_batches, device, log_file):
             n_ref = counts['detection'][2], n_both = counts['detection'][0])
     print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
     log_file.write('Detection F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*det_f1, 100*det_pr, 100*det_rc))
-    rec_pr, rec_rc, rec_f1 = calc_f1(n_out = counts['recovery'][1],
-            n_ref = counts['recovery'][2], n_both = counts['recovery'][0])
-    print('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
-    log_file.write('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
+    if data_type == 'recovery':
+        rec_pr, rec_rc, rec_f1 = calc_f1(n_out = counts['recovery'][1],
+                n_ref = counts['recovery'][2], n_both = counts['recovery'][0])
+        print('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
+        log_file.write('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
+    else:
+        pass
     log_file.flush()
     model.train()
-    return det_f1, rec_f1
+    if data_type == 'recovery':
+        return det_f1, rec_f1
+    else:
+        return det_f1, res_f1, res_span_f1
 
 
 def forward_step(model, model_type, batch):
@@ -154,26 +172,40 @@ def main():
     pro_mapping = json.load(open(FLAGS.pro_mapping, 'r'))
     print('Number of predefined pronouns: {}, they are: {}'.format(len(pro_mapping), pro_mapping.values()))
 
-    # load data
-    train_features = zp_datastream.load_and_extract_features(FLAGS.train_path, tokenizer,
-            char2word=FLAGS.char2word, data_type="recovery")
-    dev_features = zp_datastream.load_and_extract_features(FLAGS.dev_path, tokenizer,
-            char2word=FLAGS.char2word, data_type="recovery")
+    # load data and make_batches
+    print('Loading data and making batches')
+    train_instance_size = 0
+    train_batches = []
+    train_type_ranges = []
+    for path, data_type in zip(FLAGS.train_path, FLAGS.train_type):
+        features = zp_datastream.load_and_extract_features(path, tokenizer,
+                char2word=FLAGS.char2word, data_type=data_type)
+        batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
+                is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
+        train_instance_size += len(features)
+        train_batches.extend(batches)
+        train_type_ranges.append(len(train_batches))
+
+    dev_instance_size = 0
+    dev_batches = []
+    dev_type_ranges = []
+    for path, data_type in zip(FLAGS.dev_path, FLAGS.dev_type):
+        features = zp_datastream.load_and_extract_features(path, tokenizer,
+                char2word=FLAGS.char2word, data_type=data_type)
+        batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
+                is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
+        dev_instance_size += len(features)
+        dev_batches.extend(batches)
+        dev_type_ranges.append(len(dev_batches))
+
     test_features = zp_datastream.load_and_extract_features(FLAGS.test_path, tokenizer,
-            char2word=FLAGS.char2word, data_type="recovery")
-
-    # make batches
-    print('Making batches')
-    train_batches = zp_datastream.make_recovery_batch(train_features, FLAGS.batch_size,
-            is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
-    dev_batches = zp_datastream.make_recovery_batch(dev_features, FLAGS.batch_size,
-            is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
-    test_batches = zp_datastream.make_recovery_batch(test_features, FLAGS.batch_size,
+            char2word=FLAGS.char2word, data_type=FLAGS.test_type)
+    test_batches = zp_datastream.make_batch(FLAGS.test_type, test_features, FLAGS.batch_size,
             is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
 
-    print("Num training examples = {}".format(len(train_features)))
+    print("Num training examples = {}".format(train_instance_size))
     print("Num training batches = {}".format(len(train_batches)))
-    print("Num dev examples = {}".format(len(dev_features)))
+    print("Num dev examples = {}".format(dev_instance_size))
     print("Num dev batches = {}".format(len(dev_batches)))
     print("Num test examples = {}".format(len(test_features)))
     print("Num test batches = {}".format(len(test_batches)))
@@ -256,10 +288,10 @@ def save_model(model, path_prefix):
     model_to_save = model.module if hasattr(model, 'module') else model
 
     model_path = path_prefix + ".bert_model.bin"
-    config_path = path_prefix + ".bert_config.json"
+    model_config_path = path_prefix + ".bert_config.json"
 
     torch.save(model_to_save.state_dict(), model_path)
-    model_to_save.config.to_json_file(config_path)
+    model_to_save.config.to_json_file(model_config_path)
 
 
 if __name__ == '__main__':

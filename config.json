@@ -1,15 +1,20 @@
 {
-    "train_path": "data/zhidao_train_new.json",
-    "dev_path": "data/zhidao_dev_new.json",
-    "test_path": "data/zhidao_test_new.json",
-    "suffix": "bert_char",
+    "train_path": ["data/ontonotes_train.json"],
+    "train_type": ["resolution"],
+    "dev_path": ["data/ontonotes_dev.json"],
+    "dev_type": ["resolution"],
+    "test_path": "data/ontonotes_test.json",
+    "test_type": "resolution",
+    "suffix": "bertChar_res",
     "log_dir": "logs",
+    "config_path": "config.json",
     "model_type": "bert_char",
     "pretrained_path": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
 
     "is_shuffle": false,
     "is_sort": true,
+    "is_batch_mix": true,
 
     "batch_size": 10,
     "num_epochs": 10,
@@ -17,8 +22,5 @@
     "learning_rate": 8e-6,
     "warmup_proportion": 0.1,
 
-    "char2word": "first",
-
-    "config_path": "config.json",
-    "generate_config": false
+    "char2word": "first"
 }

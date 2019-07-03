@@ -5,8 +5,9 @@ import torch
 
 
 def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recovery"):
+    assert data_type in ("recovery", "resolution")
     print('Data type: {}, char2word: {}'.format(data_type, char2word))
-    print("BertChar, 'char2word' not in use")
+    print("zp_datastream_char.py: for model_type 'bert_char', 'char2word' not in use")
     data = json.load(open(path, 'r'))
 
     features = []
@@ -34,12 +35,30 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
 
     if data_type == 'recovery':
         extract_recovery(data, features, sent_id_mapping)
+    else:
+        extract_resolution(data, features, sent_id_mapping)
 
     return features
 
 
-def extract_resolution(data, features):
-    pass
+def extract_resolution(data, features, sent_id_mapping):
+    for feat in features:
+        input_ids = feat['input_ids']
+        feat['input_zp'] = [0 for _ in input_ids] # [seq]
+        feat['input_zp_span'] = [[0,0] for _ in input_ids] # [seq, 2]
+
+    for zp_inst in data['zp_info']:
+        i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
+        assert j_char >= 1 # There shouldn't be ZP before [CLS]
+        if i not in sent_id_mapping:
+            continue
+        i = sent_id_mapping[i]
+        st, ed = zp_inst['resolution_char']
+        assert features[i]['input_decision_mask'][st] == 1
+        assert features[i]['input_decision_mask'][ed] == 1
+        assert type(st) == int and type(ed) == int
+        features[i]['input_zp'][j_char] = 1
+        features[i]['input_zp_span'] = [st,ed]
 
 
 def extract_recovery(data, features, sent_id_mapping):
@@ -58,6 +77,51 @@ def extract_recovery(data, features, sent_id_mapping):
         assert type(pro_cid) == int
         features[i]['input_zp'][j_char] = 1
         features[i]['input_zp_cid'][j_char] = pro_cid
+
+
+def make_batch(data_type, features, batch_size, is_sort=True, is_shuffle=False):
+    assert data_type in ("recovery", "resolution")
+    if data_type == "recovery":
+        return make_recovery_batch(features, batch_size, is_sort=is_sort, is_shuffle=is_shuffle)
+    else:
+        return make_resolution_batch(features, batch_size, is_sort=is_sort, is_shuffle=is_shuffle)
+
+
+def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
+    if is_sort:
+        features.sort(key=lambda x: len(x['input_ids']))
+    elif is_shuffle:
+        random.shuffle(features)
+    N = 0
+    batches = []
+    while N < len(features):
+        B = min(batch_size, len(features)-N)
+        maxseq = 0
+        for i in range(0, B):
+            maxseq = max(maxseq, len(features[N+i]['input_ids']))
+        input_ids = np.zeros([B, maxseq], dtype=np.long)
+        input_mask = np.zeros([B, maxseq], dtype=np.float)
+        input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
+        input_zp = np.zeros([B, maxseq], dtype=np.long)
+        input_zp_span = np.zeros([B, maxseq, 2], dtype=np.long)
+        for i in range(0, B):
+            curseq = len(features[N+i]['input_ids'])
+            input_ids[i,:curseq] = features[N+i]['input_ids']
+            input_mask[i,:curseq] = [1,]*curseq
+            input_decision_mask[i,:curseq] = features[N+i]['input_decision_mask']
+            input_zp[i,:curseq] = features[N+i]['input_zp']
+            input_zp_span[i,:curseq] = features[N+i]['input_zp_span']
+        input_ids = torch.tensor(input_ids, dtype=torch.long)
+        input_mask = torch.tensor(input_mask, dtype=torch.float)
+        input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
+        input_zp = torch.tensor(input_zp, dtype=torch.long)
+        input_zp_span = torch.tensor(input_zp_span, dtype=torch.long)
+
+
+        batches.append({'input_ids':input_ids, 'input_mask':input_mask, 'input_decision_mask':input_decision_mask,
+            'input_zp':input_zp, 'input_zp_cid':None, 'input_zp_span':input_zp_span, 'type':'resolution'})
+        N += B
+    return batches
 
 
 # (input_ids, input_char2word, input_zp, input_zp_cid)
