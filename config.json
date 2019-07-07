@@ -3,6 +3,7 @@
     "train_type": ["resolution"],
     "dev_path": ["data/ontonotes_dev.json"],
     "dev_type": ["resolution"],
+    "dev_type_key": "resolution",
     "test_path": "data/ontonotes_test.json",
     "test_type": "resolution",
     "suffix": "bertChar_res",

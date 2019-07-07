@@ -24,12 +24,14 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
         # input_decision_mask = [1, 1, 0, 1, 1]
         input_ids = tokenizer.convert_tokens_to_ids(sent_bert_toks) # [seq]
         input_decision_mask = []
+        input_ci2wi = {}
         for j, idxs in enumerate(sent_bert_idxs):
             curlen = len(input_decision_mask)
             input_decision_mask.extend([0 for _ in idxs])
             input_decision_mask[curlen] = 1
+            input_ci2wi[curlen] = j
         assert len(input_ids) == len(input_decision_mask)
-        features.append({'input_ids':input_ids, 'input_decision_mask':input_decision_mask})
+        features.append({'input_ids':input_ids, 'input_decision_mask':input_decision_mask, 'input_ci2wi':input_ci2wi, })
         sent_id_mapping[i] = len(features) - 1
     print('OOV rate: {}, {}/{}'.format(right/total, right, total))
 
@@ -42,10 +44,10 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
 
 
 def extract_resolution(data, features, sent_id_mapping):
-    for feat in features:
-        input_ids = feat['input_ids']
-        feat['input_zp'] = [0 for _ in input_ids] # [seq]
-        feat['input_zp_span'] = [[0,0] for _ in input_ids] # [seq, 2]
+    for inst in features:
+        input_ids = inst['input_ids']
+        inst['input_zp'] = [0 for _ in input_ids] # [seq]
+        inst['input_zp_span'] = [[0,0] for _ in input_ids] # [seq, 2]
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -53,19 +55,18 @@ def extract_resolution(data, features, sent_id_mapping):
         if i not in sent_id_mapping:
             continue
         i = sent_id_mapping[i]
-        st, ed = zp_inst['resolution_char']
-        assert features[i]['input_decision_mask'][st] == 1
-        assert features[i]['input_decision_mask'][ed] == 1
-        assert type(st) == int and type(ed) == int
+        st_char, ed_char = zp_inst['resolution_char']
+        assert features[i]['input_decision_mask'][st_char] == 1
+        assert features[i]['input_decision_mask'][ed_char] == 1
         features[i]['input_zp'][j_char] = 1
-        features[i]['input_zp_span'] = [st,ed]
+        features[i]['input_zp_span'][j_char] = [st_char,ed_char]
 
 
 def extract_recovery(data, features, sent_id_mapping):
-    for feat in features:
-        input_ids = feat['input_ids']
-        feat['input_zp'] = [0 for _ in input_ids] # [seq]
-        feat['input_zp_cid'] = [0 for _ in input_ids] # [seq]
+    for inst in features:
+        input_ids = inst['input_ids']
+        inst['input_zp'] = [0 for _ in input_ids] # [seq]
+        inst['input_zp_cid'] = [0 for _ in input_ids] # [seq]
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -104,6 +105,7 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_zp = np.zeros([B, maxseq], dtype=np.long)
         input_zp_span = np.zeros([B, maxseq, 2], dtype=np.long)
+        input_ci2wi = [features[N+i]['input_ci2wi'] for i in range(0, B)]
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']
@@ -119,12 +121,12 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
 
 
         batches.append({'input_ids':input_ids, 'input_mask':input_mask, 'input_decision_mask':input_decision_mask,
-            'input_zp':input_zp, 'input_zp_cid':None, 'input_zp_span':input_zp_span, 'type':'resolution'})
+            'input_zp':input_zp, 'input_zp_cid':None, 'input_zp_span':input_zp_span,
+            'input_ci2wi':input_ci2wi, 'type':'resolution'})
         N += B
     return batches
 
 
-# (input_ids, input_char2word, input_zp, input_zp_cid)
 def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
     if is_sort:
         features.sort(key=lambda x: len(x['input_ids']))
@@ -142,6 +144,7 @@ def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_zp = np.zeros([B, maxseq], dtype=np.long)
         input_zp_cid = np.zeros([B, maxseq], dtype=np.long)
+        input_ci2wi = [features[N+i]['input_ci2wi'] for i in range(0, B)]
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']
@@ -157,7 +160,8 @@ def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
 
 
         batches.append({'input_ids':input_ids, 'input_mask':input_mask, 'input_decision_mask':input_decision_mask,
-            'input_zp':input_zp, 'input_zp_cid':input_zp_cid, 'input_zp_span':None, 'type':'recovery'})
+            'input_zp':input_zp, 'input_zp_cid':input_zp_cid, 'input_zp_span':None,
+            'input_ci2wi':input_ci2wi, 'type':'recovery'})
         N += B
     return batches
 

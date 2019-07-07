@@ -13,15 +13,16 @@ class SpanClassifier(nn.Module):
         self.span_ed_attn = MultiHeadedAttention(1, hidden_dim)
 
     def forward(self, repre, mask):
-        repre_norm = self.layer_norm(repre)
+        repre = self.layer_norm(repre)
 
         tmp1 = mask.unsqueeze(1) # [batch, 1, seq]
         tmp2 = tmp1.transpose(1, 2) # [batch, seq, 1]
         square_mask = tmp2.matmul(tmp1).byte() # [batch, seq, seq]
+        square_mask = ~square_mask
 
-        span_st_logits = self.span_st_attn(repre_norm, repre_norm, repre_norm,
+        span_st_logits = self.span_st_attn(repre, repre, repre,
                 mask=square_mask, type="self") # [batch, seq, seq]
-        span_ed_logits = self.span_ed_attn(repre_norm, repre_norm, repre_norm,
+        span_ed_logits = self.span_ed_attn(repre, repre, repre,
                 mask=square_mask, type="self") # [batch, seq, seq]
         return span_st_logits, span_ed_logits
 

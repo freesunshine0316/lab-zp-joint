@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from misc import generate_relative_positions_matrix,\
                             relative_matmul
-# from misc import aeq
+from misc import aeq
 
 
 class MultiHeadedAttention(nn.Module):
