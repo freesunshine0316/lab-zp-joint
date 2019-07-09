@@ -44,7 +44,8 @@ class BertZP(BertPreTrainedModel):
                 resolution_loss = span_loss(resolution_start_logits, resolution_end_logits,
                         resolution_start_positions, resolution_end_positions, decision_mask)
                 assert detection_refs is not None
-                return detection_loss + resolution_loss, detection_outputs, resolution_outputs
+                return {'total_loss':detection_loss + resolution_loss, 'detection_loss':detection_loss,
+                        'resolution_loss':resolution_loss}, detection_outputs, resolution_outputs
             else:
                 return None, detection_outputs, resolution_outputs
 
@@ -55,7 +56,8 @@ class BertZP(BertPreTrainedModel):
             if recovery_refs is not None:
                 recovery_loss = token_classification_loss(recovery_logits, self.pro_num, recovery_refs, decision_mask)
                 assert detection_refs is not None
-                return detection_loss + recovery_loss, detection_outputs, recovery_outputs
+                return {'total_loss':detection_loss + recovery_loss, 'detection_loss':detection_loss,
+                        'recovery_loss':recovery_loss}, detection_outputs, recovery_outputs
             else:
                 return None, detection_outputs, recovery_outputs
 

@@ -1,3 +1,3 @@
 
-python zp_trainer.py --config_path config.json
+python zp_trainer.py --config_path $1
 

@@ -47,13 +47,13 @@ def add_counts_bow(out, ref, counts):
     if sum(ref) != 0:
         counts[2] += ref[1] - ref[0] + 1
         ins_st, ins_ed = max(out[0],ref[0]), min(out[1],ref[1])
-        count[0] += max(ins_ed - ins_st + 1, 0)
+        counts[0] += max(ins_ed - ins_st + 1, 0)
 
 
-def dev_eval(model, model_type, dev_batches, device, log_file):
+def dev_eval(model, model_type, development_sets, device, log_file):
     model.eval()
     dev_eval_results = []
-    for devset in dev_batches:
+    for devset in development_sets:
         data_type = devset['data_type']
         batches = devset['batches']
         assert data_type in ('recovery', 'resolution')
@@ -105,7 +105,7 @@ def dev_eval(model, model_type, dev_batches, device, log_file):
                                 counts=counts['resolution'])
                         out = resolution_out[i][j]
                         out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
-                        ref = input_sp_span[i][j]
+                        ref = input_zp_span[i][j]
                         ref = input_ci2wi[i][ref[0]], input_ci2wi[i][ref[1]]
                         add_counts_bow(out=out, ref=ref,
                                 counts=counts['resolution_bow'])
@@ -136,6 +136,9 @@ def dev_eval(model, model_type, dev_batches, device, log_file):
             print('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
             log_file.write('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
             cur_result['resolution_bow_f1'] = bow_f1
+        if len(development_sets) > 1:
+            print('+++++')
+            log_file.write('+++++\n')
         log_file.flush()
         dev_eval_results.append(cur_result)
     model.train()
@@ -165,6 +168,38 @@ def forward_step(model, model_type, batch):
     return loss, out1, out2
 
 
+def get_train_batch_ids(FLAGS, range_ends):
+    assert FLAGS.is_balanced_sampling in ('none', 'up', 'down')
+    if FLAGS.is_balanced_sampling == 'none':
+        return list(range(0, range_ends[-1]))
+    max_size, min_size = 0, 10000000
+    st = 0
+    for ed in range_ends:
+        min_size = min(min_size, ed - st)
+        max_size = max(max_size, ed - st)
+        st = ed
+
+    batch_ids = []
+    if FLAGS.is_balanced_sampling == 'down':
+        st = 0
+        for ed in range_ends:
+            if ed - st > min_size:
+                batch_ids += random.sample(range(st,ed), min_size)
+            else:
+                batch_ids += list(range(st,ed))
+            st = ed
+        return batch_ids
+    else:
+        st = 0
+        for ed in range_ends:
+            if ed - st < max_size:
+                batch_ids += random.choices(range(st,ed), max_size)
+            else:
+                batch_ids += list(range(st,ed))
+            st = ed
+        return batch_ids
+
+
 def main():
     log_dir = FLAGS.log_dir
     if not os.path.exists(log_dir):
@@ -174,13 +209,14 @@ def main():
     log_file_path = path_prefix + ".log"
     print('Log file path: {}'.format(log_file_path))
     log_file = open(log_file_path, 'wt')
-    log_file.write("{}\n".format(FLAGS))
+    log_file.write("{}\n".format(str(FLAGS)))
     log_file.flush()
     config_utils.save_config(FLAGS, path_prefix + ".config.json")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()
     print('device: {}, n_gpu: {}, grad_accum_steps: {}'.format(device, n_gpu, FLAGS.grad_accum_steps))
+    log_file.write('device: {}, n_gpu: {}, grad_accum_steps: {}\n'.format(device, n_gpu, FLAGS.grad_accum_steps))
 
     tokenizer = None
     if 'bert' in FLAGS.pretrained_path:
@@ -188,12 +224,13 @@ def main():
 
     pro_mapping = json.load(open(FLAGS.pro_mapping, 'r'))
     print('Number of predefined pronouns: {}, they are: {}'.format(len(pro_mapping), pro_mapping.values()))
+    log_file.write('Number of predefined pronouns: {}, they are: {}\n'.format(len(pro_mapping), pro_mapping.values()))
 
     # load data and make_batches
     print('Loading data and making batches')
     train_instance_size = 0
     train_batches = []
-    train_type_ranges = []
+    train_range_ends = []
     for path, data_type in zip(FLAGS.train_path, FLAGS.train_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
                 char2word=FLAGS.char2word, data_type=data_type)
@@ -201,7 +238,7 @@ def main():
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         train_instance_size += len(features)
         train_batches.extend(batches)
-        train_type_ranges.append(len(train_batches))
+        train_range_ends.append(len(train_batches))
 
     devsets = []
     for path, data_type in zip(FLAGS.dev_path, FLAGS.dev_type):
@@ -211,12 +248,13 @@ def main():
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         devsets.append({'data_type':data_type, 'batches':batches})
 
-    # TODO: multi-testsets, like devset setting
-    test_features = zp_datastream.load_and_extract_features(FLAGS.test_path, tokenizer,
-            char2word=FLAGS.char2word, data_type=FLAGS.test_type)
-    test_batches = zp_datastream.make_batch(FLAGS.test_type, test_features, FLAGS.batch_size,
-            is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
-    testset = {'data_type':FLAGS.test_type, 'batches':test_batches}
+    testsets = []
+    for path, data_type in zip(FLAGS.test_path, FLAGS.test_type):
+        features = zp_datastream.load_and_extract_features(path, tokenizer,
+                char2word=FLAGS.char2word, data_type=data_type)
+        batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
+                is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
+        testsets.append({'data_type':data_type, 'batches':batches})
 
     print("Num training examples = {}".format(train_instance_size))
     print("Num training batches = {}".format(len(train_batches)))
@@ -231,6 +269,7 @@ def main():
 
     print('Starting the training loop, ', end="")
     train_steps = len(train_batches) * FLAGS.num_epochs
+    train_bert_steps = len(train_batches) * FLAGS.num_bert_epochs
     if FLAGS.grad_accum_steps > 1:
         train_steps = train_steps // FLAGS.grad_accum_steps
     print("total steps = {}".format(train_steps))
@@ -246,46 +285,50 @@ def main():
             t_total=train_steps)
 
     best_f1 = 0.0
-    global_step = 0
-    train_batch_ids = list(range(0, len(train_batches)))
+    finished_steps = 0
     model.train()
-    for _ in range(FLAGS.num_epochs):
-        train_loss = 0
+    while finished_steps < train_steps:
         epoch_start = time.time()
-        if FLAGS.is_shuffle:
+        train_loss = {'total_loss':0.0, 'detection_loss':0.0, 'recovery_loss':0.0, 'resolution_loss':0.0}
+        train_batch_ids = get_train_batch_ids(FLAGS, train_range_ends)
+        if FLAGS.is_batch_mix:
             random.shuffle(train_batch_ids)
+        if finished_steps >= train_bert_steps:
+            model.bert.require_grad = False
         for id in train_batch_ids:
             ori_batch = train_batches[id]
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
 
-            loss, _, _ = forward_step(model, FLAGS.model_type, batch)
+            step_loss, _, _ = forward_step(model, FLAGS.model_type, batch)
 
+            loss = step_loss['total_loss']
             if n_gpu > 1:
                 loss = loss.mean()
             if FLAGS.grad_accum_steps > 1:
                 loss = loss / FLAGS.grad_accum_steps
-            train_loss += loss.item()
-
             loss.backward() # just calculate gradient
-            global_step += 1
 
-            train_loss += loss.item()
-            if global_step % FLAGS.grad_accum_steps == 0:
+            for k,v in step_loss.items():
+                train_loss[k] += v.item()
+
+            if finished_steps % FLAGS.grad_accum_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
 
-            if global_step % 100 == 0:
-                print('{} '.format(global_step), end="")
+            finished_steps += 1
+            if finished_steps % 100 == 0:
+                print('{} '.format(finished_steps), end="")
                 sys.stdout.flush()
 
         duration = time.time()-epoch_start
-        print('\nTraining loss: %.2f, time: %.3f sec' % (train_loss, duration))
+        print('\nTraining loss: %s, time: %.3f sec' % (str(train_loss), duration))
         log_file.write('\nTraining loss: %.2f, time: %.3f sec\n' % (train_loss, duration))
-        cur_f1 = None
+        cur_f1 = []
         for dev_result in dev_eval(model, FLAGS.model_type, devsets, device, log_file):
-            if FLAGS.dev_type_key == dev_result['data_type']:
-                cur_f1 = dev_result['key_f1']
+            if dev_result['data_type'] in FLAGS.dev_key_types:
+                cur_f1.append(dev_result['key_f1'])
+        cur_f1 = np.mean(cur_f1)
         if cur_f1 > best_f1:
             print('Saving weights, F1 {} (prev_best) < {} (cur)'.format(best_f1, cur_f1))
             log_file.write('Saving weights, F1 {} (prev_best) < {} (cur)\n'.format(best_f1, cur_f1))
@@ -293,7 +336,7 @@ def main():
             save_model(model, path_prefix)
         print('-------------')
         log_file.write('-------------\n')
-        dev_eval(model, FLAGS.model_type, [testset], device, log_file)
+        dev_eval(model, FLAGS.model_type, testsets, device, log_file)
         print('=============')
         log_file.write('=============\n')
         if torch.cuda.is_available():
@@ -303,28 +346,31 @@ def main():
 def save_model(model, path_prefix):
     model_to_save = model.module if hasattr(model, 'module') else model
 
-    model_path = path_prefix + ".bert_model.bin"
+    model_bin_path = path_prefix + ".bert_model.bin"
     model_config_path = path_prefix + ".bert_config.json"
 
-    torch.save(model_to_save.state_dict(), model_path)
+    torch.save(model_to_save.state_dict(), model_bin_path)
     model_to_save.config.to_json_file(model_config_path)
+
+
+def check_config(FLAGS):
+    assert type(FLAGS.grad_accum_steps) == int and FLAGS.grad_accum_steps >= 1
+    assert hasattr(FLAGS, "cuda_device")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_path', type=str, help='Configuration file.')
-
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="0"
-
-    print("CUDA_VISIBLE_DEVICES " + os.environ['CUDA_VISIBLE_DEVICES'])
     FLAGS, unparsed = parser.parse_known_args()
 
     if FLAGS.config_path is not None:
         print('Loading hyperparameters from ' + FLAGS.config_path)
         FLAGS = config_utils.load_config(FLAGS.config_path)
+    check_config(FLAGS)
 
-    assert type(FLAGS.grad_accum_steps) == int and FLAGS.grad_accum_steps >= 1
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = FLAGS.cuda_device
+    print("CUDA_VISIBLE_DEVICES " + os.environ['CUDA_VISIBLE_DEVICES'])
 
     if FLAGS.model_type == 'bert_word':
         import zp_datastream

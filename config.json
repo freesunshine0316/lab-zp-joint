@@ -1,27 +1,30 @@
 {
-    "train_path": ["data/ontonotes_train.json"],
-    "train_type": ["resolution"],
-    "dev_path": ["data/ontonotes_dev.json"],
-    "dev_type": ["resolution"],
-    "dev_type_key": "resolution",
-    "test_path": "data/ontonotes_test.json",
-    "test_type": "resolution",
-    "suffix": "bertChar_res",
+    "train_path": ["data/ontonotes_train.json","data/zhidao_train_new.json"],
+    "train_type": ["resolution","recovery"],
+    "dev_path": ["data/ontonotes_dev.json","data/zhidao_dev_new.json"],
+    "dev_type": ["resolution","recovery"],
+    "dev_key_types": ["recovery"],
+    "test_path": ["data/ontonotes_test.json","data/zhidao_test_new.json"],
+    "test_type": ["resolution","recovery"],
     "log_dir": "logs",
-    "config_path": "config.json",
+    "suffix": "mix_bertChar",
     "model_type": "bert_char",
     "pretrained_path": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
 
     "is_shuffle": false,
     "is_sort": true,
+    "is_balanced_sampling": "none",
     "is_batch_mix": true,
 
     "batch_size": 10,
     "num_epochs": 10,
+    "num_bert_epochs":3,
     "grad_accum_steps": 1,
-    "learning_rate": 8e-6,
+    "learning_rate": 1e-5,
     "warmup_proportion": 0.1,
 
-    "char2word": "first"
+    "char2word": "first",
+    
+    "cuda_device": "0"
 }
