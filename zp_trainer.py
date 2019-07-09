@@ -69,7 +69,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             # execution
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
-            loss, detection_out, tmp_out = forward_step(model,
+            step_loss, detection_out, tmp_out = forward_step(model,
                     model_type, batch)
             input_zp, input_zp_cid, input_zp_span, input_ci2wi = \
                     batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['input_ci2wi']
@@ -80,7 +80,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             else:
                 input_zp_span = input_zp_span.cpu().tolist()
                 resolution_out = tmp_out.cpu().tolist()
-            total_loss += loss.item()
+            total_loss += step_loss['total_loss'].item()
             # generate results and counts for F1
             if model_type == 'bert_char': # if char-level model
                 mask = batch['input_decision_mask']
@@ -323,7 +323,7 @@ def main():
 
         duration = time.time()-epoch_start
         print('\nTraining loss: %s, time: %.3f sec' % (str(train_loss), duration))
-        log_file.write('\nTraining loss: %.2f, time: %.3f sec\n' % (train_loss, duration))
+        log_file.write('\nTraining loss: %s, time: %.3f sec\n' % (str(train_loss), duration))
         cur_f1 = []
         for dev_result in dev_eval(model, FLAGS.model_type, devsets, device, log_file):
             if dev_result['data_type'] in FLAGS.dev_key_types:
