@@ -59,18 +59,20 @@ def dev_eval(model, model_type, development_sets, device, log_file):
         assert data_type in ('recovery', 'resolution')
         print('Evaluating on dataset with data_type: {}'.format(data_type))
         N = 0
-        total_loss = 0.0
-        counts = {'detection':[0.0 for _ in range(3)],
-                'recovery':[0.0 for _ in range(3)],
-                'resolution':[0.0 for _ in range(3)],
-                'resolution_bow':[0.0 for _ in range(3)]}
+        dev_loss = {'total_loss':0.0, 'detection_loss':0.0, 'recovery_loss':0.0, 'resolution_loss':0.0}
+        dev_counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)], 'resolution':[0.0 for _ in range(3)]}
         start = time.time()
         for step, ori_batch in enumerate(batches):
             # execution
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
-            step_loss, detection_out, tmp_out = forward_step(model,
-                    model_type, batch)
+            step_loss, detection_out, tmp_out = forward_step(model, model_type, batch)
+
+            # record loss
+            for k,v in step_loss.items():
+                dev_loss[k] += v.item() if type(v) == torch.Tensor else v
+
+            # generate outputs
             input_zp, input_zp_cid, input_zp_span, input_ci2wi = \
                     batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['input_ci2wi']
             input_zp, detection_out = input_zp.cpu().tolist(), detection_out.cpu().tolist()
@@ -80,14 +82,14 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             else:
                 input_zp_span = input_zp_span.cpu().tolist()
                 resolution_out = tmp_out.cpu().tolist()
-            total_loss += step_loss['total_loss'].item()
-            # generate results and counts for F1
+            # generate mask and lenghts
             if model_type == 'bert_char': # if char-level model
                 mask = batch['input_decision_mask']
                 lens = batch['input_mask'].sum(dim=-1).long()
             else:
                 mask = batch['input_wordmask']
                 lens = batch['input_wordmask'].sum(dim=-1).long()
+            # update counts for F1
             B = list(lens.size())[0]
             for i in range(B):
                 for j in range(1, lens[i]-1): # [CLS] A B C ... [SEP]
@@ -96,46 +98,47 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                     if mask[i,j] == 0.0:
                         continue
                     add_counts(out=detection_out[i][j], ref=input_zp[i][j],
-                            counts=counts['detection'])
+                            counts=dev_counts['detection'])
                     if data_type == 'recovery':
                         add_counts(out=recovery_out[i][j], ref=input_zp_cid[i][j],
-                                counts=counts['recovery'])
+                                counts=dev_counts['recovery'])
                     else:
                         add_counts(out=resolution_out[i][j], ref=input_zp_span[i][j],
-                                counts=counts['resolution'])
-                        out = resolution_out[i][j]
-                        out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
-                        ref = input_zp_span[i][j]
-                        ref = input_ci2wi[i][ref[0]], input_ci2wi[i][ref[1]]
-                        add_counts_bow(out=out, ref=ref,
-                                counts=counts['resolution_bow'])
+                                counts=dev_counts['resolution'])
+                        #out = resolution_out[i][j]
+                        #out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
+                        #ref = input_zp_span[i][j]
+                        #ref = input_ci2wi[i][ref[0]], input_ci2wi[i][ref[1]]
+                        #add_counts_bow(out=out, ref=ref,
+                        #        counts=dev_counts['resolution_bow'])
                 N += B
         # output and calculate performance
+        total_loss = dev_loss['total_loss']
         duration = time.time()-start
         print('Loss: %.2f, time: %.3f sec' % (total_loss, duration))
         log_file.write('Loss: %.2f, time: %.3f sec\n' % (total_loss, duration))
-        det_pr, det_rc, det_f1 = calc_f1(n_out=counts['detection'][1],
-                n_ref=counts['detection'][2], n_both=counts['detection'][0])
+        det_pr, det_rc, det_f1 = calc_f1(n_out=dev_counts['detection'][1],
+                n_ref=dev_counts['detection'][2], n_both=dev_counts['detection'][0])
         print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
         log_file.write('Detection F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*det_f1, 100*det_pr, 100*det_rc))
         cur_result = {'data_type':data_type, 'loss':total_loss, 'detection_f1':det_f1}
         if data_type == 'recovery':
-            rec_pr, rec_rc, rec_f1 = calc_f1(n_out=counts['recovery'][1],
-                    n_ref=counts['recovery'][2], n_both=counts['recovery'][0])
+            rec_pr, rec_rc, rec_f1 = calc_f1(n_out=dev_counts['recovery'][1],
+                    n_ref=dev_counts['recovery'][2], n_both=dev_counts['recovery'][0])
             print('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
             log_file.write('Recovery F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*rec_f1, 100*rec_pr, 100*rec_rc))
             cur_result['key_f1'] = rec_f1
         else:
-            res_pr, res_rc, res_f1 = calc_f1(n_out=counts['resolution'][1],
-                    n_ref=counts['resolution'][2], n_both=counts['resolution'][0])
+            res_pr, res_rc, res_f1 = calc_f1(n_out=dev_counts['resolution'][1],
+                    n_ref=dev_counts['resolution'][2], n_both=dev_counts['resolution'][0])
             print('Resolution F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*res_f1, 100*res_pr, 100*res_rc))
             log_file.write('Resolution F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*res_f1, 100*res_pr, 100*res_rc))
             cur_result['key_f1'] = res_f1
-            bow_pr, bow_rc, bow_f1 = calc_f1(n_out=counts['resolution_bow'][1],
-                    n_ref=counts['resolution_bow'][2], n_both=counts['resolution_bow'][0])
-            print('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
-            log_file.write('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
-            cur_result['resolution_bow_f1'] = bow_f1
+            #bow_pr, bow_rc, bow_f1 = calc_f1(n_out=dev_counts['resolution_bow'][1],
+            #        n_ref=dev_counts['resolution_bow'][2], n_both=dev_counts['resolution_bow'][0])
+            #print('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
+            #log_file.write('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
+            #cur_result['resolution_bow_f1'] = bow_f1
         if len(development_sets) > 1:
             print('+++++')
             log_file.write('+++++\n')
@@ -168,7 +171,7 @@ def forward_step(model, model_type, batch):
     return loss, out1, out2
 
 
-def get_train_batch_ids(FLAGS, range_ends):
+def training_data_scaling_unused(FLAGS, range_ends):
     assert FLAGS.is_balanced_sampling in ('none', 'up', 'down')
     if FLAGS.is_balanced_sampling == 'none':
         return list(range(0, range_ends[-1]))
@@ -228,7 +231,7 @@ def main():
 
     # load data and make_batches
     print('Loading data and making batches')
-    train_instance_size = 0
+    train_instance_number = 0
     train_batches = []
     train_range_ends = []
     for path, data_type in zip(FLAGS.train_path, FLAGS.train_type):
@@ -236,7 +239,7 @@ def main():
                 char2word=FLAGS.char2word, data_type=data_type)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
-        train_instance_size += len(features)
+        train_instance_number += len(features)
         train_batches.extend(batches)
         train_range_ends.append(len(train_batches))
 
@@ -256,20 +259,21 @@ def main():
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         testsets.append({'data_type':data_type, 'batches':batches})
 
-    print("Num training examples = {}".format(train_instance_size))
+    print("Num training examples = {}".format(train_instance_number))
     print("Num training batches = {}".format(len(train_batches)))
+    print("Data option: is_shuffle {}, is_sort {}, is_balanced_sampling {}, is_batch_mix {}".format(FLAGS.is_shuffle,
+        FLAGS.is_sort, FLAGS.is_balanced_sampling, FLAGS.is_batch_mix))
 
     # create model
     print('Compiling model')
-    model = zp_model.BertZP.from_pretrained(FLAGS.pretrained_path,
-            char2word=FLAGS.char2word, pro_num=len(pro_mapping))
+    model = zp_model.BertZP.from_pretrained(FLAGS.pretrained_path, char2word=FLAGS.char2word,
+            pro_num=len(pro_mapping), max_relative_position=FLAGS.max_relative_position)
     model.to(device)
     if n_gpu > 1:
         model = nn.DataParallel(model)
 
     print('Starting the training loop, ', end="")
     train_steps = len(train_batches) * FLAGS.num_epochs
-    train_bert_steps = len(train_batches) * FLAGS.num_bert_epochs
     if FLAGS.grad_accum_steps > 1:
         train_steps = train_steps // FLAGS.grad_accum_steps
     print("total steps = {}".format(train_steps))
@@ -285,32 +289,55 @@ def main():
             t_total=train_steps)
 
     best_f1 = 0.0
-    finished_steps = 0
+    finished_steps, finished_epochs = 0, 0
+    rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':2e-5}
     model.train()
     while finished_steps < train_steps:
         epoch_start = time.time()
         train_loss = {'total_loss':0.0, 'detection_loss':0.0, 'recovery_loss':0.0, 'resolution_loss':0.0}
-        train_batch_ids = get_train_batch_ids(FLAGS, train_range_ends)
+
+        # TODO: modify the batch-id range
+        if finished_epochs < 1:
+            train_batch_ids = list(range(0, train_range_ends[-1]))
+        else:
+            train_batch_ids = list(range(0, train_range_ends[-1]))
+
+        # TODO: freeze bert parameters
+        if finished_epochs == 10:
+            print("!!!!!Freeze BERT parameters")
+            for param in model.bert.parameters():
+                param.requires_grad = False
+
+        print('Current epoch takes {} steps'.format(len(train_batch_ids)))
         if FLAGS.is_batch_mix:
             random.shuffle(train_batch_ids)
-        if finished_steps >= train_bert_steps:
-            model.bert.require_grad = False
         for id in train_batch_ids:
             ori_batch = train_batches[id]
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
 
             step_loss, _, _ = forward_step(model, FLAGS.model_type, batch)
+            for k,v in step_loss.items():
+                train_loss[k] += v.item() if type(v) == torch.Tensor else v
 
-            loss = step_loss['total_loss']
+            # TODO: modify the loss type
+            step_loss['total_loss'] = rates['detection_discount']*step_loss['detection_loss'] + step_loss['%s_loss'%batch['type']]
+            if finished_epochs < 1:
+                #loss = step_loss['total_loss']
+                loss = step_loss['%s_loss'%batch['type']]
+            else:
+                #loss = step_loss['total_loss']
+                loss = step_loss['%s_loss'%batch['type']]
+
             if n_gpu > 1:
                 loss = loss.mean()
             if FLAGS.grad_accum_steps > 1:
                 loss = loss / FLAGS.grad_accum_steps
             loss.backward() # just calculate gradient
 
-            for k,v in step_loss.items():
-                train_loss[k] += v.item()
+            # TODO: adapt lr for batches of different types
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = rates[batch['type']]
 
             if finished_steps % FLAGS.grad_accum_steps == 0:
                 optimizer.step()
@@ -341,6 +368,7 @@ def main():
         log_file.write('=============\n')
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        finished_epochs += 1
 
 
 def save_model(model, path_prefix):

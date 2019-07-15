@@ -8,14 +8,14 @@ from span_classifier import SpanClassifier
 
 
 class BertZP(BertPreTrainedModel):
-    def __init__(self, config, char2word="sum", pro_num=-1):
+    def __init__(self, config, char2word, pro_num, max_relative_position):
         super(BertZP, self).__init__(config)
         print("zp_model_char.py: for model_type 'bert_char', 'char2word' not in use")
         assert type(pro_num) is int and pro_num > 1
         self.pro_num = pro_num
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.resolution_classifier = SpanClassifier(config.hidden_size)
+        self.resolution_classifier = SpanClassifier(config.hidden_size, max_relative_position)
         self.detection_classifier = nn.Linear(config.hidden_size, 2)
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
@@ -28,6 +28,7 @@ class BertZP(BertPreTrainedModel):
         #detection
         detection_logits = self.detection_classifier(char_repre) # [batch, seq, 2]
         detection_outputs = detection_logits.argmax(dim=-1) # [batch, seq]
+        detection_loss = torch.tensor(0.0)
         if detection_refs is not None:
             detection_loss = token_classification_loss(detection_logits, 2, detection_refs, decision_mask)
 
@@ -37,29 +38,27 @@ class BertZP(BertPreTrainedModel):
             resolution_start_outputs = resolution_start_logits.argmax(dim=-1)
             resolution_end_outputs = resolution_end_logits.argmax(dim=-1)
             resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, wordseq, 2]
+            resolution_loss = torch.tensor(0.0)
             if resolution_refs is not None:
                 resolution_start_positions, resolution_end_positions = resolution_refs.split(1, dim=2)
                 resolution_start_positions = resolution_start_positions.squeeze(dim=2)
                 resolution_end_positions = resolution_end_positions.squeeze(dim=2)
                 resolution_loss = span_loss(resolution_start_logits, resolution_end_logits,
                         resolution_start_positions, resolution_end_positions, decision_mask)
-                assert detection_refs is not None
-                return {'total_loss':detection_loss + resolution_loss, 'detection_loss':detection_loss,
-                        'resolution_loss':resolution_loss}, detection_outputs, resolution_outputs
-            else:
-                return None, detection_outputs, resolution_outputs
+                total_loss = detection_loss + resolution_loss
+            return {'total_loss': total_loss, 'detection_loss': detection_loss, 'resolution_loss': resolution_loss}, \
+                    detection_outputs, resolution_outputs
 
         #recovery
         if batch_type == 'recovery':
             recovery_logits = self.recovery_classifier(char_repre) # [batch, wordseq, pro_num]
             recovery_outputs = recovery_logits.argmax(dim=-1) # [batch, wordseq]
+            recovery_loss = torch.tensor(0.0)
             if recovery_refs is not None:
                 recovery_loss = token_classification_loss(recovery_logits, self.pro_num, recovery_refs, decision_mask)
-                assert detection_refs is not None
-                return {'total_loss':detection_loss + recovery_loss, 'detection_loss':detection_loss,
-                        'recovery_loss':recovery_loss}, detection_outputs, recovery_outputs
-            else:
-                return None, detection_outputs, recovery_outputs
+                total_loss = detection_loss + recovery_loss
+            return {'total_loss': total_loss, 'detection_loss': detection_loss, 'recovery_loss': recovery_loss}, \
+                    detection_outputs, recovery_outputs
 
         assert False, "batch_type need to be either 'recovery' or 'resolution'"
 

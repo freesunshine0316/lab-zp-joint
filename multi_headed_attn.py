@@ -178,9 +178,9 @@ class MultiHeadedAttention(nn.Module):
             #  1 or key_len x key_len x dim_per_head
             relations_keys = self.relative_positions_embeddings(
                 relative_positions_matrix.to(device))
-            #  1 or key_len x key_len x dim_per_head
-            relations_values = self.relative_positions_embeddings(
-                relative_positions_matrix.to(device))
+            ##  1 or key_len x key_len x dim_per_head
+            #relations_values = self.relative_positions_embeddings(
+            #    relative_positions_matrix.to(device))
 
         query = shape(query)
 
