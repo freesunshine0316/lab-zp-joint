@@ -20,7 +20,7 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
         sent_bert_toks = [x if x in tokenizer.vocab else '[UNK]' for x in sent_bert_toks]
         right += sum([x == '[UNK]' for x in sent_bert_toks])
         total += len(sent_bert_toks)
-        # Example sent_bert_idxs: [0] [1, 2, 3] [4]; sent_bert_toks: [CLS] A B C [SEP]
+        # Example sent_bert_idxs: [0] [1,2] [3] [4]; sent_bert_toks: [CLS] A B C [SEP]
         # input_decision_mask = [1, 1, 0, 1, 1]
         input_ids = tokenizer.convert_tokens_to_ids(sent_bert_toks) # [seq]
         input_decision_mask = []
@@ -29,7 +29,6 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
             curlen = len(input_decision_mask)
             input_decision_mask.extend([0 for _ in idxs])
             input_decision_mask[curlen] = 1
-            input_decision_mask[-1] = 1
             input_ci2wi[curlen] = j
         assert len(input_ids) == len(input_decision_mask)
         features.append({'input_ids':input_ids, 'input_decision_mask':input_decision_mask, 'input_ci2wi':input_ci2wi, })
@@ -48,7 +47,7 @@ def extract_resolution(data, features, sent_id_mapping):
     for inst in features:
         input_ids = inst['input_ids']
         inst['input_zp'] = [0 for _ in input_ids] # [seq]
-        inst['input_zp_span'] = [[] for _ in input_ids] # [seq, list of 2]
+        inst['input_zp_span'] = [[0,0] for _ in input_ids] # [seq, 2]
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -56,11 +55,11 @@ def extract_resolution(data, features, sent_id_mapping):
         if i not in sent_id_mapping:
             continue
         i = sent_id_mapping[i]
+        st_char, ed_char = zp_inst['resolution_char']
+        assert features[i]['input_decision_mask'][st_char] == 1
+        assert features[i]['input_decision_mask'][ed_char] == 1
         features[i]['input_zp'][j_char] = 1
-        for st_char, ed_char in zp_inst['resolution_char']:
-            assert features[i]['input_decision_mask'][st_char] == 1
-            assert features[i]['input_decision_mask'][ed_char] == 1
-            features[i]['input_zp_span'][j_char].append([st_char,ed_char])
+        features[i]['input_zp_span'][j_char] = [st_char,ed_char]
 
 
 def extract_recovery(data, features, sent_id_mapping):
@@ -105,21 +104,15 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_mask = np.zeros([B, maxseq], dtype=np.float)
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_zp = np.zeros([B, maxseq], dtype=np.long)
-        input_zp_span = np.zeros([B, maxseq, maxseq, 2], dtype=np.long)
+        input_zp_span = np.zeros([B, maxseq, 2], dtype=np.long)
         input_ci2wi = [features[N+i]['input_ci2wi'] for i in range(0, B)]
-        input_zp_span_multiref = [[] for i in range(0, B)] # [batch, curseq, set of spans]
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']
             input_mask[i,:curseq] = [1,]*curseq
             input_decision_mask[i,:curseq] = features[N+i]['input_decision_mask']
             input_zp[i,:curseq] = features[N+i]['input_zp']
-            input_zp_span_multiref[i] = [set() for j in range(0, curseq)]
-            for j in range(0, curseq):
-                for st_char, ed_char in features[N+i]['input_zp_span'][j]:
-                    input_zp_span[i,j,st_char][0] = 1
-                    input_zp_span[i,j,ed_char][1] = 1
-                    input_zp_span_multiref[i][j].add((st_char,ed_char))
+            input_zp_span[i,:curseq] = features[N+i]['input_zp_span']
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
@@ -129,7 +122,7 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
 
         batches.append({'input_ids':input_ids, 'input_mask':input_mask, 'input_decision_mask':input_decision_mask,
             'input_zp':input_zp, 'input_zp_cid':None, 'input_zp_span':input_zp_span,
-            'input_ci2wi':input_ci2wi, 'input_multi_zp_span_multiref':input_zp_span_multiref, 'type':'resolution'})
+            'input_ci2wi':input_ci2wi, 'type':'resolution'})
         N += B
     return batches
 

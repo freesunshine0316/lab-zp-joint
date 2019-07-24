@@ -35,14 +35,14 @@ class BertZP(BertPreTrainedModel):
         #resolution
         if batch_type == 'resolution':
             resolution_start_logits, resolution_end_logits = self.resolution_classifier(char_repre, decision_mask)
-            resolution_start_outputs = resolution_start_logits.argmax(dim=-1)
-            resolution_end_outputs = resolution_end_logits.argmax(dim=-1)
-            resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, wordseq, 2]
+            resolution_start_outputs = resolution_start_logits.argmax(dim=-1) # [batch, seq]
+            resolution_end_outputs = resolution_end_logits.argmax(dim=-1) # [batch, seq]
+            resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, seq, 2]
             resolution_loss = torch.tensor(0.0)
-            if resolution_refs is not None:
-                resolution_start_positions, resolution_end_positions = resolution_refs.split(1, dim=2)
-                resolution_start_positions = resolution_start_positions.squeeze(dim=2)
-                resolution_end_positions = resolution_end_positions.squeeze(dim=2)
+            if resolution_refs is not None: # [batch, seq, seq, 2]
+                resolution_start_positions, resolution_end_positions = resolution_refs.split(1, dim=-1)
+                resolution_start_positions = resolution_start_positions.squeeze(dim=-1) # [batch, seq, seq]
+                resolution_end_positions = resolution_end_positions.squeeze(dim=-1) # [batch, seq, seq]
                 resolution_loss = span_loss(resolution_start_logits, resolution_end_logits,
                         resolution_start_positions, resolution_end_positions, decision_mask)
                 total_loss = detection_loss + resolution_loss
@@ -72,15 +72,23 @@ def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, n
     return loss_fct(active_logits, active_refs)
 
 
+# logits: [batch, seq, seq]
+# refs: [batch, seq, seq]
+# masks: [batch, seq]
+def token_classification_loss_v2(logits, refs, masks):
+    num_tokens = torch.sum(masks).item()
+    distrib = nn.Softmax(dim=-1)(logits)
+    return -1.0 * torch.sum(distrib.log()*refs.float()) / num_tokens
+
+
 # start_logits: [batch, seq, seq]
 # end_logits: [batch, seq, seq]
-# start_positions: [batch, seq]
-# end_positions: [batch, seq]
+# start_positions: [batch, seq, seq]
+# end_positions: [batch, seq, seq]
 # seq_masks: [batch, seq]
 def span_loss(start_logits, end_logits, start_positions, end_positions, seq_masks):
-    num_labels = list(seq_masks.size())[1]
-    span_st_loss = token_classification_loss(start_logits, num_labels, start_positions, seq_masks)
-    span_ed_loss = token_classification_loss(end_logits, num_labels, end_positions, seq_masks)
+    span_st_loss = token_classification_loss_v2(start_logits, start_positions, seq_masks)
+    span_ed_loss = token_classification_loss_v2(end_logits, end_positions, seq_masks)
     return span_st_loss + span_ed_loss
 
 

@@ -28,16 +28,16 @@ def calc_f1(n_out, n_ref, n_both):
 # [0,0] or 0 mean 'not applicable'
 def add_counts(out, ref, counts):
     assert type(out) in (int, list)
-    assert type(ref) in (int, list)
+    assert type(ref) in (int, list, set)
     if type(out) == int:
         out = [out,]
     if type(ref) == int:
         ref = [ref,]
     if sum(out) != 0:
         counts[1] += 1.0
-    if sum(ref) != 0:
+    if (type(ref) == list and sum(ref) != 0) or (type(ref) == set and len(ref) > 0):
         counts[2] += 1.0
-        if out == ref:
+        if out == ref or tuple(out) in ref:
             counts[0] += 1.0
 
 
@@ -67,20 +67,18 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
             step_loss, detection_out, tmp_out = forward_step(model, model_type, batch)
-
             # record loss
             for k,v in step_loss.items():
                 dev_loss[k] += v.item() if type(v) == torch.Tensor else v
-
             # generate outputs
-            input_zp, input_zp_cid, input_zp_span, input_ci2wi = \
-                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['input_ci2wi']
+            input_zp, input_zp_cid, input_zp_span_multiref, input_ci2wi = \
+                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span_multiref'], batch['input_ci2wi']
             input_zp, detection_out = input_zp.cpu().tolist(), detection_out.cpu().tolist()
             if data_type == 'recovery':
                 input_zp_cid = input_zp_cid.cpu().tolist()
                 recovery_out = tmp_out.cpu().tolist()
             else:
-                input_zp_span = input_zp_span.cpu().tolist()
+                input_zp_span = input_zp_span_multiref
                 resolution_out = tmp_out.cpu().tolist()
             # generate mask and lenghts
             if model_type == 'bert_char': # if char-level model
@@ -290,6 +288,7 @@ def main():
 
     best_f1 = 0.0
     finished_steps, finished_epochs = 0, 0
+    # TODO: change rates
     rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':2e-5}
     model.train()
     while finished_steps < train_steps:
@@ -303,7 +302,7 @@ def main():
             train_batch_ids = list(range(0, train_range_ends[-1]))
 
         # TODO: freeze bert parameters
-        if finished_epochs == 10:
+        if finished_epochs == 100:
             print("!!!!!Freeze BERT parameters")
             for param in model.bert.parameters():
                 param.requires_grad = False
@@ -325,6 +324,7 @@ def main():
             if finished_epochs < 1:
                 #loss = step_loss['total_loss']
                 loss = step_loss['%s_loss'%batch['type']]
+                #loss = step_loss['detection_loss']
             else:
                 #loss = step_loss['total_loss']
                 loss = step_loss['%s_loss'%batch['type']]
