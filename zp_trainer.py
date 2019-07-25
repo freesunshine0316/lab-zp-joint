@@ -131,11 +131,12 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                                 counts=dev_counts['resolution'])
                         out_st_dist = step_out['resolution_start_dist'].cpu().tolist()
                         out_ed_dist = step_out['resolution_end_dist'].cpu().tolist()
-                        add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i][j],
-                                out_ed_dist=out_ed_dist[i][j],
-                                nps=batch['input_nps'][i],
-                                multiref=input_zp_span[i][j],
-                                counts=dev_counts['resolution_nps'])
+                        if input_zp[i][j]:
+                            add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i][j],
+                                    out_ed_dist=out_ed_dist[i][j],
+                                    nps=batch['input_nps'][i],
+                                    multiref=input_zp_span[i][j],
+                                    counts=dev_counts['resolution_nps'])
                         #out = resolution_out[i][j]
                         #out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
                         #ref = input_zp_span[i][j]
