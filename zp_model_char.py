@@ -34,20 +34,22 @@ class BertZP(BertPreTrainedModel):
 
         #resolution
         if batch_type == 'resolution':
-            resolution_start_logits, resolution_end_logits = self.resolution_classifier(char_repre, decision_mask)
-            resolution_start_outputs = resolution_start_logits.argmax(dim=-1) # [batch, seq]
-            resolution_end_outputs = resolution_end_logits.argmax(dim=-1) # [batch, seq]
+            # both are [batch, seq, seq]
+            resolution_start_dist, resolution_end_dist = self.resolution_classifier(char_repre, decision_mask)
+            resolution_start_outputs = resolution_start_dist.argmax(dim=-1) # [batch, seq]
+            resolution_end_outputs = resolution_end_dist.argmax(dim=-1) # [batch, seq]
             resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, seq, 2]
             resolution_loss = torch.tensor(0.0)
             if resolution_refs is not None: # [batch, seq, seq, 2]
                 resolution_start_positions, resolution_end_positions = resolution_refs.split(1, dim=-1)
                 resolution_start_positions = resolution_start_positions.squeeze(dim=-1) # [batch, seq, seq]
                 resolution_end_positions = resolution_end_positions.squeeze(dim=-1) # [batch, seq, seq]
-                resolution_loss = span_loss(resolution_start_logits, resolution_end_logits,
+                resolution_loss = span_loss(resolution_start_dist, resolution_end_dist,
                         resolution_start_positions, resolution_end_positions, decision_mask)
                 total_loss = detection_loss + resolution_loss
             return {'total_loss': total_loss, 'detection_loss': detection_loss, 'resolution_loss': resolution_loss}, \
-                    detection_outputs, resolution_outputs
+                   {'detection_outputs': detection_outputs, 'resolution_outputs': resolution_outputs,
+                    'resolution_start_dist': resolution_start_dist, 'resolution_end_dist': resolution_end_dist}
 
         #recovery
         if batch_type == 'recovery':
@@ -58,7 +60,7 @@ class BertZP(BertPreTrainedModel):
                 recovery_loss = token_classification_loss(recovery_logits, self.pro_num, recovery_refs, decision_mask)
                 total_loss = detection_loss + recovery_loss
             return {'total_loss': total_loss, 'detection_loss': detection_loss, 'recovery_loss': recovery_loss}, \
-                    detection_outputs, recovery_outputs
+                   {'detection_outputs': detection_outputs, 'recovery_outputs': recovery_outputs}
 
         assert False, "batch_type need to be either 'recovery' or 'resolution'"
 
@@ -75,20 +77,21 @@ def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, n
 # logits: [batch, seq, seq]
 # refs: [batch, seq, seq]
 # masks: [batch, seq]
-def token_classification_loss_v2(logits, refs, masks):
+def token_classification_loss_v2(dist, refs, masks):
+    loss = torch.sum(dist.log()*refs.float(), dim=-1) # [batch, seq]
     num_tokens = torch.sum(masks).item()
-    distrib = nn.Softmax(dim=-1)(logits)
-    return -1.0 * torch.sum(distrib.log()*refs.float()) / num_tokens
+    assert num_tokens > 1
+    return -1.0 * torch.sum(loss * masks) / num_tokens
 
 
-# start_logits: [batch, seq, seq]
-# end_logits: [batch, seq, seq]
+# start_dist: [batch, seq, seq]
+# end_dist: [batch, seq, seq]
 # start_positions: [batch, seq, seq]
 # end_positions: [batch, seq, seq]
 # seq_masks: [batch, seq]
-def span_loss(start_logits, end_logits, start_positions, end_positions, seq_masks):
-    span_st_loss = token_classification_loss_v2(start_logits, start_positions, seq_masks)
-    span_ed_loss = token_classification_loss_v2(end_logits, end_positions, seq_masks)
+def span_loss(start_dist, end_dist, start_positions, end_positions, seq_masks):
+    span_st_loss = token_classification_loss_v2(start_dist, start_positions, seq_masks)
+    span_ed_loss = token_classification_loss_v2(end_dist, end_positions, seq_masks)
     return span_st_loss + span_ed_loss
 
 

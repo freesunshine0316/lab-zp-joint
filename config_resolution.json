@@ -1,13 +1,13 @@
 {
-    "train_path": ["data/ontonotes_train.json_v2","data/zhidao_train_new.json"],
-    "train_type": ["resolution","recovery"],
-    "dev_path": ["data/ontonotes_dev.json_v2","data/zhidao_dev_new.json"],
-    "dev_type": ["resolution","recovery"],
+    "train_path": ["data/ontonotes_dev.json_v2"],
+    "train_type": ["resolution"],
+    "dev_path": ["data/ontonotes_dev.json_v2"],
+    "dev_type": ["resolution"],
     "dev_key_types": ["recovery"],
-    "test_path": ["data/ontonotes_test.json_v2","data/zhidao_test_new.json"],
-    "test_type": ["resolution","recovery"],
+    "test_path": ["data/ontonotes_test.json_v2"],
+    "test_type": ["resolution"],
     "log_dir": "logs",
-    "suffix": "mix_bertChar",
+    "suffix": "dev_bertChar",
     "model_type": "bert_char",
     "pretrained_path": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
@@ -17,7 +17,7 @@
     "is_balanced_sampling": "none",
     "is_batch_mix": true,
 
-    "batch_size": 5,
+    "batch_size": 10,
     "num_epochs": 10,
     "grad_accum_steps": 1,
     "learning_rate": 1e-5,
@@ -26,5 +26,5 @@
 
     "char2word": "first",
     
-    "cuda_device": "1"
+    "cuda_device": "0"
 }

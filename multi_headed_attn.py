@@ -202,7 +202,10 @@ class MultiHeadedAttention(nn.Module):
             mask = mask.unsqueeze(1)  # [B, 1, 1, T_values]
             scores = scores.masked_fill(mask, -1e18)
 
-        return scores.view(batch_size, query_len, key_len)
+        dist = torch.clamp(self.softmax(scores), 1e-6, 1.0)
+        dist = dist / dist.sum(-1,keepdim=True)
+
+        return dist.view(batch_size, query_len, key_len)
 
         ## 3) Apply attention dropout and compute context vectors.
         #attn = self.softmax(scores).to(query.dtype)
