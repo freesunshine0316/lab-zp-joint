@@ -7,7 +7,7 @@
     "test_path": ["data/zhidao_test_new.json"],
     "test_type": ["recovery"],
     "log_dir": "logs",
-    "suffix": "tmp",
+    "suffix": "recovery_bertChar",
     "model_type": "bert_char",
     "pretrained_path": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
@@ -15,7 +15,7 @@
     "is_shuffle": false,
     "is_sort": true,
     "is_balanced_sampling": "none",
-    "is_batch_mix": false,
+    "is_batch_mix": true,
 
     "batch_size": 10,
     "num_epochs": 10,

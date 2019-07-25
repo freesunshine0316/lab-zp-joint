@@ -22,10 +22,10 @@ class SpanClassifier(nn.Module):
         square_mask = tmp2.matmul(tmp1).byte() # [batch, seq, seq]
         square_mask = ~square_mask
 
-        span_st_logits = self.span_st_attn(repre, repre, repre,
+        span_st_dist = self.span_st_attn(repre, repre, repre,
                 mask=square_mask, type="self") # [batch, seq, seq]
-        span_ed_logits = self.span_ed_attn(repre, repre, repre,
+        span_ed_dist = self.span_ed_attn(repre, repre, repre,
                 mask=square_mask, type="self") # [batch, seq, seq]
-        return span_st_logits, span_ed_logits
+        return span_st_dist, span_ed_dist
 
 

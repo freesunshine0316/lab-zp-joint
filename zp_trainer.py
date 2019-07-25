@@ -28,26 +28,51 @@ def calc_f1(n_out, n_ref, n_both):
 # [0,0] or 0 mean 'not applicable'
 def add_counts(out, ref, counts):
     assert type(out) in (int, list)
-    assert type(ref) in (int, list, set)
+    assert type(ref) in (int, list)
     if type(out) == int:
         out = [out,]
     if type(ref) == int:
         ref = [ref,]
     if sum(out) != 0:
         counts[1] += 1.0
-    if (type(ref) == list and sum(ref) != 0) or (type(ref) == set and len(ref) > 0):
+    if sum(ref) != 0:
         counts[2] += 1.0
         if out == ref or tuple(out) in ref:
             counts[0] += 1.0
 
 
-def add_counts_bow(out, ref, counts):
+def add_counts_resolution(out, multiref, counts):
+    assert type(out) is list
+    assert type(multiref) is list
     if sum(out) != 0:
-        counts[1] += out[1] - out[0] + 1
-    if sum(ref) != 0:
-        counts[2] += ref[1] - ref[0] + 1
-        ins_st, ins_ed = max(out[0],ref[0]), min(out[1],ref[1])
-        counts[0] += max(ins_ed - ins_st + 1, 0)
+        counts[1] += 1.0
+    assert len(multiref) > 0
+    if multiref != [[0,0]]:
+        counts[2] += 1.0
+        if sum(out) != 0 and out in multiref:
+            counts[0] += 1.0
+
+
+def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, counts):
+    best_score = 0.0
+    best_np = [0,0]
+    for st, ed in nps:
+        if ed > zp_index:
+            break
+        cur_score = out_st_dist[st] * out_ed_dist[ed]
+        if cur_score > best_score:
+            best_score = cur_score
+            best_np = [st, ed]
+    add_counts_resolution(best_np, multiref, counts)
+
+
+#def add_counts_bow(out, ref, counts):
+#    if sum(out) != 0:
+#        counts[1] += out[1] - out[0] + 1
+#    if sum(ref) != 0:
+#        counts[2] += ref[1] - ref[0] + 1
+#        ins_st, ins_ed = max(out[0],ref[0]), min(out[1],ref[1])
+#        counts[0] += max(ins_ed - ins_st + 1, 0)
 
 
 def dev_eval(model, model_type, development_sets, device, log_file):
@@ -60,26 +85,27 @@ def dev_eval(model, model_type, development_sets, device, log_file):
         print('Evaluating on dataset with data_type: {}'.format(data_type))
         N = 0
         dev_loss = {'total_loss':0.0, 'detection_loss':0.0, 'recovery_loss':0.0, 'resolution_loss':0.0}
-        dev_counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)], 'resolution':[0.0 for _ in range(3)]}
+        dev_counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)], 'resolution':[0.0 for _ in range(3)],
+                      'resolution_nps':[0.0 for _ in range(3)]}
         start = time.time()
         for step, ori_batch in enumerate(batches):
             # execution
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
-            step_loss, detection_out, tmp_out = forward_step(model, model_type, batch)
+            step_loss, step_out = forward_step(model, model_type, batch)
             # record loss
             for k,v in step_loss.items():
                 dev_loss[k] += v.item() if type(v) == torch.Tensor else v
             # generate outputs
-            input_zp, input_zp_cid, input_zp_span_multiref, input_ci2wi = \
-                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span_multiref'], batch['input_ci2wi']
-            input_zp, detection_out = input_zp.cpu().tolist(), detection_out.cpu().tolist()
+            input_zp, input_zp_cid, input_zp_span, input_ci2wi = \
+                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['input_ci2wi']
+            input_zp, detection_out = input_zp.cpu().tolist(), step_out['detection_outputs'].cpu().tolist()
             if data_type == 'recovery':
                 input_zp_cid = input_zp_cid.cpu().tolist()
-                recovery_out = tmp_out.cpu().tolist()
+                recovery_out = step_out['recovery_outputs'].cpu().tolist()
             else:
-                input_zp_span = input_zp_span_multiref
-                resolution_out = tmp_out.cpu().tolist()
+                input_zp_span = batch['input_zp_span_multiref']
+                resolution_out = step_out['resolution_outputs'].cpu().tolist()
             # generate mask and lenghts
             if model_type == 'bert_char': # if char-level model
                 mask = batch['input_decision_mask']
@@ -87,7 +113,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             else:
                 mask = batch['input_wordmask']
                 lens = batch['input_wordmask'].sum(dim=-1).long()
-            # update counts for F1
+            # update counts for calculating F1
             B = list(lens.size())[0]
             for i in range(B):
                 for j in range(1, lens[i]-1): # [CLS] A B C ... [SEP]
@@ -101,8 +127,16 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                         add_counts(out=recovery_out[i][j], ref=input_zp_cid[i][j],
                                 counts=dev_counts['recovery'])
                     else:
-                        add_counts(out=resolution_out[i][j], ref=input_zp_span[i][j],
+                        add_counts_resolution(out=resolution_out[i][j], multiref=input_zp_span[i][j],
                                 counts=dev_counts['resolution'])
+                        out_st_dist = step_out['resolution_start_dist'].cpu().tolist()
+                        out_ed_dist = step_out['resolution_end_dist'].cpu().tolist()
+                        if input_zp[i][j]:
+                            add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i][j],
+                                    out_ed_dist=out_ed_dist[i][j],
+                                    nps=batch['input_nps'][i],
+                                    multiref=input_zp_span[i][j],
+                                    counts=dev_counts['resolution_nps'])
                         #out = resolution_out[i][j]
                         #out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
                         #ref = input_zp_span[i][j]
@@ -132,11 +166,11 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             print('Resolution F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*res_f1, 100*res_pr, 100*res_rc))
             log_file.write('Resolution F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*res_f1, 100*res_pr, 100*res_rc))
             cur_result['key_f1'] = res_f1
-            #bow_pr, bow_rc, bow_f1 = calc_f1(n_out=dev_counts['resolution_bow'][1],
-            #        n_ref=dev_counts['resolution_bow'][2], n_both=dev_counts['resolution_bow'][0])
-            #print('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
-            #log_file.write('Resolution BoW F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*bow_f1, 100*bow_pr, 100*bow_rc))
-            #cur_result['resolution_bow_f1'] = bow_f1
+            resnp_pr, resnp_rc, resnp_f1 = calc_f1(n_out=dev_counts['resolution_nps'][1],
+                    n_ref=dev_counts['resolution_nps'][2], n_both=dev_counts['resolution_nps'][0])
+            print('Resolution NP F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*resnp_f1, 100*resnp_pr, 100*resnp_rc))
+            log_file.write('Resolution NP F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*resnp_f1, 100*resnp_pr, 100*resnp_rc))
+            cur_result['resolution_np_f1'] = resnp_f1
         if len(development_sets) > 1:
             print('+++++')
             log_file.write('+++++\n')
@@ -154,7 +188,7 @@ def forward_step(model, model_type, batch):
         input_zp, input_zp_cid, input_zp_span, batch_type = \
                 batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
 
-        loss, out1, out2 = model(input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask,
+        loss, outputs = model(input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask,
                 input_zp, input_zp_span, input_zp_cid, batch_type)
     elif model_type == 'bert_char':
         input_ids, input_mask, input_decision_mask = \
@@ -162,11 +196,11 @@ def forward_step(model, model_type, batch):
         input_zp, input_zp_cid, input_zp_span, batch_type = \
                 batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
 
-        loss, out1, out2 = model(input_ids, input_mask, input_decision_mask,
+        loss, outputs = model(input_ids, input_mask, input_decision_mask,
                 input_zp, input_zp_span, input_zp_cid, batch_type)
     else:
         assert False, "model_type '{}' not supported".format(model_type)
-    return loss, out1, out2
+    return loss, outputs
 
 
 def training_data_scaling_unused(FLAGS, range_ends):
@@ -311,11 +345,14 @@ def main():
         if FLAGS.is_batch_mix:
             random.shuffle(train_batch_ids)
         for id in train_batch_ids:
+            #if finished_steps == 100:
+            #    finished_steps = 0
+            #    break
             ori_batch = train_batches[id]
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}
 
-            step_loss, _, _ = forward_step(model, FLAGS.model_type, batch)
+            step_loss, _ = forward_step(model, FLAGS.model_type, batch)
             for k,v in step_loss.items():
                 train_loss[k] += v.item() if type(v) == torch.Tensor else v
 

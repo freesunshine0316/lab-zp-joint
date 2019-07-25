@@ -45,10 +45,18 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
 
 
 def extract_resolution(data, features, sent_id_mapping):
-    for inst in features:
-        input_ids = inst['input_ids']
-        inst['input_zp'] = [0 for _ in input_ids] # [seq]
-        inst['input_zp_span'] = [[] for _ in input_ids] # [seq, list of 2]
+    for feat in features:
+        input_ids = feat['input_ids']
+        feat['input_nps'] = [] # [list of span]
+        feat['input_zp'] = [0 for _ in input_ids] # [seq]
+        feat['input_zp_span'] = [[[0,0],] for _ in input_ids] # [seq, list of span]
+
+    for i, sent_nps in enumerate(data['sentences_nps']):
+        if i not in sent_id_mapping:
+            continue
+        i = sent_id_mapping[i]
+        features[i]['input_nps'] = [x_dict['span_char'] for x_dict in sent_nps]
+        features[i]['input_nps'].append([0,0]) # add [0,0] NP as None category
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -57,9 +65,11 @@ def extract_resolution(data, features, sent_id_mapping):
             continue
         i = sent_id_mapping[i]
         features[i]['input_zp'][j_char] = 1
-        for st_char, ed_char in zp_inst['resolution_char']:
+        for k, (st_char, ed_char) in enumerate(zp_inst['resolution_char']):
             assert features[i]['input_decision_mask'][st_char] == 1
             assert features[i]['input_decision_mask'][ed_char] == 1
+            if features[i]['input_zp_span'][j_char][-1] == [0,0]:
+                features[i]['input_zp_span'][j_char].pop()
             features[i]['input_zp_span'][j_char].append([st_char,ed_char])
 
 
@@ -106,20 +116,21 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_zp = np.zeros([B, maxseq], dtype=np.long)
         input_zp_span = np.zeros([B, maxseq, maxseq, 2], dtype=np.long)
+        input_zp_span_multiref = [[] for i in range(0, B)] # [batch, seq, list of spans]
         input_ci2wi = [features[N+i]['input_ci2wi'] for i in range(0, B)]
-        input_zp_span_multiref = [[] for i in range(0, B)] # [batch, curseq, set of spans]
+        input_nps = [features[N+i]['input_nps'] for i in range(0, B)] # [batch, list of spans]
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']
             input_mask[i,:curseq] = [1,]*curseq
             input_decision_mask[i,:curseq] = features[N+i]['input_decision_mask']
             input_zp[i,:curseq] = features[N+i]['input_zp']
-            input_zp_span_multiref[i] = [set() for j in range(0, curseq)]
+            input_zp_span_multiref[i] = [[] for j in range(0, curseq)]
             for j in range(0, curseq):
                 for st_char, ed_char in features[N+i]['input_zp_span'][j]:
-                    input_zp_span[i,j,st_char][0] = 1
-                    input_zp_span[i,j,ed_char][1] = 1
-                    input_zp_span_multiref[i][j].add((st_char,ed_char))
+                    input_zp_span[i,j,st_char,0] = 1
+                    input_zp_span[i,j,ed_char,1] = 1
+                    input_zp_span_multiref[i][j].append([st_char,ed_char])
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
@@ -129,7 +140,8 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
 
         batches.append({'input_ids':input_ids, 'input_mask':input_mask, 'input_decision_mask':input_decision_mask,
             'input_zp':input_zp, 'input_zp_cid':None, 'input_zp_span':input_zp_span,
-            'input_ci2wi':input_ci2wi, 'input_multi_zp_span_multiref':input_zp_span_multiref, 'type':'resolution'})
+            'input_ci2wi':input_ci2wi, 'input_nps':input_nps, 'type':'resolution',
+            'input_zp_span_multiref': input_zp_span_multiref})
         N += B
     return batches
 
