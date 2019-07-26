@@ -42,14 +42,14 @@ def add_counts(out, ref, counts):
 
 
 def add_counts_resolution(out, multiref, counts):
-    assert type(out) is list
-    assert type(multiref) is list
+    assert type(multiref) is set
+    out = tuple(out)
     if sum(out) != 0:
         counts[1] += 1.0
     assert len(multiref) > 0
-    if multiref != [[0,0]]:
+    if (0,0) not in multiref:
         counts[2] += 1.0
-        if sum(out) != 0 and out in multiref:
+        if out in multiref:
             counts[0] += 1.0
 
 

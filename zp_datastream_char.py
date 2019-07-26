@@ -49,7 +49,7 @@ def extract_resolution(data, features, sent_id_mapping):
         input_ids = feat['input_ids']
         feat['input_nps'] = [] # [list of span]
         feat['input_zp'] = [0 for _ in input_ids] # [seq]
-        feat['input_zp_span'] = [[[0,0],] for _ in input_ids] # [seq, list of span]
+        feat['input_zp_span'] = [[(0,0),] for _ in input_ids] # [seq, list of span]
 
     for i, sent_nps in enumerate(data['sentences_nps']):
         if i not in sent_id_mapping:
@@ -68,9 +68,9 @@ def extract_resolution(data, features, sent_id_mapping):
         for k, (st_char, ed_char) in enumerate(zp_inst['resolution_char']):
             assert features[i]['input_decision_mask'][st_char] == 1
             assert features[i]['input_decision_mask'][ed_char] == 1
-            if features[i]['input_zp_span'][j_char][-1] == [0,0]:
+            if features[i]['input_zp_span'][j_char][-1] == (0,0):
                 features[i]['input_zp_span'][j_char].pop()
-            features[i]['input_zp_span'][j_char].append([st_char,ed_char])
+            features[i]['input_zp_span'][j_char].append((st_char,ed_char))
 
 
 def extract_recovery(data, features, sent_id_mapping):
@@ -116,7 +116,7 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_zp = np.zeros([B, maxseq], dtype=np.long)
         input_zp_span = np.zeros([B, maxseq, maxseq, 2], dtype=np.long)
-        input_zp_span_multiref = [[] for i in range(0, B)] # [batch, seq, list of spans]
+        input_zp_span_multiref = [[] for i in range(0, B)] # [batch, seq, SET of spans]
         input_ci2wi = [features[N+i]['input_ci2wi'] for i in range(0, B)]
         input_nps = [features[N+i]['input_nps'] for i in range(0, B)] # [batch, list of spans]
         for i in range(0, B):
@@ -125,12 +125,12 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
             input_mask[i,:curseq] = [1,]*curseq
             input_decision_mask[i,:curseq] = features[N+i]['input_decision_mask']
             input_zp[i,:curseq] = features[N+i]['input_zp']
-            input_zp_span_multiref[i] = [[] for j in range(0, curseq)]
+            input_zp_span_multiref[i] = [set() for j in range(0, curseq)]
             for j in range(0, curseq):
                 for st_char, ed_char in features[N+i]['input_zp_span'][j]:
                     input_zp_span[i,j,st_char,0] = 1
                     input_zp_span[i,j,ed_char,1] = 1
-                    input_zp_span_multiref[i][j].append([st_char,ed_char])
+                    input_zp_span_multiref[i][j].add((st_char,ed_char))
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
