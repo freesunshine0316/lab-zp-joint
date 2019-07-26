@@ -44,10 +44,10 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
     return features
 
 
-def extract_resolution(data, features, sent_id_mapping):
+def extract_resolution(data, features, sent_id_mapping, is_goldtree=True):
     for feat in features:
         input_ids = feat['input_ids']
-        feat['input_nps'] = [] # [list of span]
+        feat['input_nps'] = [] # [SET of span]
         feat['input_zp'] = [0 for _ in input_ids] # [seq]
         feat['input_zp_span'] = [[(0,0),] for _ in input_ids] # [seq, list of span]
 
@@ -55,8 +55,8 @@ def extract_resolution(data, features, sent_id_mapping):
         if i not in sent_id_mapping:
             continue
         i = sent_id_mapping[i]
-        features[i]['input_nps'] = [x_dict['span_char'] for x_dict in sent_nps]
-        features[i]['input_nps'].append([0,0]) # add [0,0] NP as None category
+        features[i]['input_nps'] = set(tuple(x['span_char']) for x in sent_nps)
+        features[i]['input_nps'].add((0,0)) # add (0,0) NP as None category
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -66,6 +66,8 @@ def extract_resolution(data, features, sent_id_mapping):
         i = sent_id_mapping[i]
         features[i]['input_zp'][j_char] = 1
         for k, (st_char, ed_char) in enumerate(zp_inst['resolution_char']):
+            if is_goldtree:
+                assert (st_char,ed_char) in features[i]['input_nps']
             assert features[i]['input_decision_mask'][st_char] == 1
             assert features[i]['input_decision_mask'][ed_char] == 1
             if features[i]['input_zp_span'][j_char][-1] == (0,0):
@@ -118,7 +120,7 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_zp_span = np.zeros([B, maxseq, maxseq, 2], dtype=np.long)
         input_zp_span_multiref = [[] for i in range(0, B)] # [batch, seq, SET of spans]
         input_ci2wi = [features[N+i]['input_ci2wi'] for i in range(0, B)]
-        input_nps = [features[N+i]['input_nps'] for i in range(0, B)] # [batch, list of spans]
+        input_nps = [features[N+i]['input_nps'] for i in range(0, B)] # [batch, SET of spans]
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']

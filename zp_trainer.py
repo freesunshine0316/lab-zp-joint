@@ -46,7 +46,6 @@ def add_counts_resolution(out, multiref, counts):
     out = tuple(out)
     if sum(out) != 0:
         counts[1] += 1.0
-    assert len(multiref) > 0
     if (0,0) not in multiref:
         counts[2] += 1.0
         if out in multiref:
@@ -54,13 +53,10 @@ def add_counts_resolution(out, multiref, counts):
 
 
 # With NP information, we only consider the NPs before zp_index
-# If there's no overlap between NP and multiref:
-#     If the NPs are gold, then we consider multiref as set((0,0))
-#     Else,
 def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, counts):
     best_score = 0.0
-    best_np = [0,0]
-    for st, ed in nps:
+    best_np = (0,0)
+    for (st,ed) in nps:
         if ed > zp_index:
             break
         if (st,ed) in multiref:
@@ -68,7 +64,7 @@ def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, 
         cur_score = out_st_dist[st] * out_ed_dist[ed]
         if cur_score > best_score:
             best_score = cur_score
-            best_np = [st, ed]
+            best_np = (st,ed)
     add_counts_resolution(best_np, multiref, counts)
 
 
@@ -105,13 +101,14 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             # generate outputs
             input_zp, input_zp_cid, input_zp_span, input_ci2wi = \
                     batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['input_ci2wi']
-            input_zp, detection_out = input_zp.cpu().tolist(), step_out['detection_outputs'].cpu().tolist()
+            input_zp = input_zp.cpu().tolist()
+            detection_out = step_out['detection_outputs'].cpu().tolist()
             if data_type == 'recovery':
                 input_zp_cid = input_zp_cid.cpu().tolist()
                 recovery_out = step_out['recovery_outputs'].cpu().tolist()
             else:
                 input_zp_span = batch['input_zp_span_multiref']
-                resolution_out = step_out['resolution_outputs'].cpu().tolist()
+                resolution_out = step_out['resolution_outputs'].cpu().tolist() # [batch, seq, 2]
             # generate mask and lenghts
             if model_type == 'bert_char': # if char-level model
                 mask = batch['input_decision_mask']
@@ -135,8 +132,8 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                     else:
                         add_counts_resolution(out=resolution_out[i][j], multiref=input_zp_span[i][j],
                                 counts=dev_counts['resolution'])
-                        out_st_dist = step_out['resolution_start_dist'].cpu().tolist()
-                        out_ed_dist = step_out['resolution_end_dist'].cpu().tolist()
+                        out_st_dist = step_out['resolution_start_dist'].cpu().tolist() # [batch, seq, seq]
+                        out_ed_dist = step_out['resolution_end_dist'].cpu().tolist() # [batch, seq, seq]
                         if input_zp[i][j]:
                             add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i][j],
                                     out_ed_dist=out_ed_dist[i][j],
