@@ -53,12 +53,18 @@ def add_counts_resolution(out, multiref, counts):
             counts[0] += 1.0
 
 
+# With NP information, we only consider the NPs before zp_index
+# If there's no overlap between NP and multiref:
+#     If the NPs are gold, then we consider multiref as set((0,0))
+#     Else,
 def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, counts):
     best_score = 0.0
     best_np = [0,0]
     for st, ed in nps:
         if ed > zp_index:
             break
+        if (st,ed) in multiref:
+            is_np_zp_overlap = True
         cur_score = out_st_dist[st] * out_ed_dist[ed]
         if cur_score > best_score:
             best_score = cur_score
