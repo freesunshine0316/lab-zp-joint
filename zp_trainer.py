@@ -134,12 +134,12 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                                 counts=dev_counts['resolution'])
                         out_st_dist = step_out['resolution_start_dist'] # [batch, seq, seq]
                         out_ed_dist = step_out['resolution_end_dist'] # [batch, seq, seq]
-                        #if input_zp[i][j]:
-                        #    add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i][j],
-                        #            out_ed_dist=out_ed_dist[i][j],
-                        #            nps=batch['input_nps'][i],
-                        #            multiref=input_zp_span[i][j],
-                        #            counts=dev_counts['resolution_nps'])
+                        if input_zp[i][j]:
+                            add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i,j],
+                                    out_ed_dist=out_ed_dist[i,j],
+                                    nps=batch['input_nps'][i],
+                                    multiref=input_zp_span[i][j],
+                                    counts=dev_counts['resolution_nps'])
                         #out = resolution_out[i][j]
                         #out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
                         #ref = input_zp_span[i][j]
@@ -169,11 +169,11 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             print('Resolution F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*res_f1, 100*res_pr, 100*res_rc))
             log_file.write('Resolution F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*res_f1, 100*res_pr, 100*res_rc))
             cur_result['key_f1'] = res_f1
-            #resnp_pr, resnp_rc, resnp_f1 = calc_f1(n_out=dev_counts['resolution_nps'][1],
-            #        n_ref=dev_counts['resolution_nps'][2], n_both=dev_counts['resolution_nps'][0])
-            #print('Resolution NP F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*resnp_f1, 100*resnp_pr, 100*resnp_rc))
-            #log_file.write('Resolution NP F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*resnp_f1, 100*resnp_pr, 100*resnp_rc))
-            #cur_result['resolution_np_f1'] = resnp_f1
+            resnp_pr, resnp_rc, resnp_f1 = calc_f1(n_out=dev_counts['resolution_nps'][1],
+                    n_ref=dev_counts['resolution_nps'][2], n_both=dev_counts['resolution_nps'][0])
+            print('Resolution NP F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*resnp_f1, 100*resnp_pr, 100*resnp_rc))
+            log_file.write('Resolution NP F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*resnp_f1, 100*resnp_pr, 100*resnp_rc))
+            cur_result['resolution_np_f1'] = resnp_f1
         if len(development_sets) > 1:
             print('+++++')
             log_file.write('+++++\n')
