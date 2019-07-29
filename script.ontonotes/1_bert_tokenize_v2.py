@@ -80,6 +80,7 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
                         continue
                     candi_offset = all_offsets[candi_sent_index]
                     candi_st, candi_ed = candi_st+candi_offset, candi_ed+candi_offset
+                    assert (candi_st,candi_ed) != (0,0)
                     # If we have the gold tree and zp candidate is not an NP, just skip it
                     if is_goldtree and (candi_st,candi_ed) not in nps_set:
                         continue

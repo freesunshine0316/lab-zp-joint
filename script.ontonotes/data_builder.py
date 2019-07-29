@@ -78,7 +78,8 @@ def generate_data(files):
     noun_phrases = []
     zp_info = defaultdict(list)
 
-    azp_in_np, azp_total = 0.0, 0.0
+    #azp_in_np, azp_total = 0.0, 0.0
+    right, total = 0.0, 0.0
 
     startt = timeit.default_timer()
     for p in paths:
@@ -144,8 +145,8 @@ def generate_data(files):
                         is_match |= (candi_begin_index,candi_end_index) in noun_phrases[candi_sent_index]
                         zp2ana[(zp_sent_index, zp_index)].append((candi_sent_index,
                             candi_begin_index, candi_end_index))
-                azp_in_np += is_match
-                azp_total += 1.0
+                #azp_in_np += is_match
+                #azp_total += 1.0
 
             for (zp_sent_index, zp_index) in zps:
                 zp_sent_index = senti2globalsenti[zp_sent_index]
@@ -153,12 +154,17 @@ def generate_data(files):
                 if (zp_sent_index, zp_index) not in zp2ana:
                     zp2ana[(zp_sent_index, zp_index)] = []
 
+            for k,v in zp2ana.items():
+                total += 1.0
+                right += len(v) > 0
+
             # store zp information
             for k, v in zp2ana.items():
                 zp_sent_index, zp_index = k
                 v = sorted(v)
                 zp_info[zp_sent_index].append({'zp_index':zp_index, 'ana_spans':v})
-    print(azp_in_np/azp_total)
+    #print(azp_in_np/azp_total)
+    print('{}, {}, {} '.format(right/total, right, total))
 
     for i in range(len(sentences)):
         sentences[i] = (' '.join(sentences[i])).decode('utf-8')
