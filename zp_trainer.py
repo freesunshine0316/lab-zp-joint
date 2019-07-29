@@ -57,10 +57,8 @@ def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, 
     best_score = 0.0
     best_np = (0,0)
     for (st,ed) in nps:
-        if ed > zp_index:
-            break
-        if (st,ed) in multiref:
-            is_np_zp_overlap = True
+        #if ed > zp_index:
+        #    break
         cur_score = out_st_dist[st].item() * out_ed_dist[ed].item()
         if cur_score > best_score:
             best_score = cur_score
@@ -154,7 +152,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
         log_file.write('Loss: %.2f, time: %.3f sec\n' % (total_loss, duration))
         det_pr, det_rc, det_f1 = calc_f1(n_out=dev_counts['detection'][1],
                 n_ref=dev_counts['detection'][2], n_both=dev_counts['detection'][0])
-        print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
+        #print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
         log_file.write('Detection F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*det_f1, 100*det_pr, 100*det_rc))
         cur_result = {'data_type':data_type, 'loss':total_loss, 'detection_f1':det_f1}
         if data_type == 'recovery':
@@ -362,12 +360,12 @@ def main():
             # TODO: modify the loss type
             step_loss['total_loss'] = rates['detection_discount']*step_loss['detection_loss'] + step_loss['%s_loss'%batch['type']]
             if finished_epochs < 1:
-                #loss = step_loss['total_loss']
-                loss = step_loss['%s_loss'%batch['type']]
+                loss = step_loss['total_loss']
+                #loss = step_loss['%s_loss'%batch['type']]
                 #loss = step_loss['detection_loss']
             else:
-                #loss = step_loss['total_loss']
-                loss = step_loss['%s_loss'%batch['type']]
+                loss = step_loss['total_loss']
+                #loss = step_loss['%s_loss'%batch['type']]
 
             if n_gpu > 1:
                 loss = loss.mean()
