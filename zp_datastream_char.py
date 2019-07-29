@@ -72,8 +72,9 @@ def extract_resolution(data, features, sent_id_mapping, is_goldtree=True):
         i = sent_id_mapping[i]
         features[i]['input_zp'][j_char] = 1
         for k, (st_char, ed_char) in enumerate(zp_inst['resolution_char']):
-            assert (st_char,ed_char) != (0,0)
-            if is_goldtree:
+            assert (st_char,ed_char) != (0,0) # span can't be (0,0), which represents 'None' for resolution
+            assert ed_char < j_char # Resolution span should be less than ZP-index
+            if is_goldtree: # if gold tree, then span should be an NP
                 assert (st_char,ed_char) in features[i]['input_nps']
             #assert features[i]['input_decision_mask'][st_char] == 1
             #assert features[i]['input_decision_mask'][ed_char] == 1
@@ -148,6 +149,10 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
                     input_zp_span[i,j,st_char,0] = 1
                     input_zp_span[i,j,ed_char,1] = 1
                     input_zp_span_multiref[i][j].add((st_char,ed_char))
+                    if (st_char,ed_char) != (0,0):
+                        assert ed_char < j
+                if (0,0) in input_zp_span_multiref[i][j]:
+                    assert len(input_zp_span_multiref[i][j]) == 1
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)

@@ -57,8 +57,8 @@ def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, 
     best_score = 0.0
     best_np = (0,0)
     for (st,ed) in nps:
-        #if ed > zp_index:
-        #    break
+        if ed != 0 and ed > zp_index:
+            break
         cur_score = out_st_dist[st].item() * out_ed_dist[ed].item()
         if cur_score > best_score:
             best_score = cur_score

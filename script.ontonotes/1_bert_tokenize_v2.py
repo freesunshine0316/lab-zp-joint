@@ -84,9 +84,11 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
                     # If we have the gold tree and zp candidate is not an NP, just skip it
                     if is_goldtree and (candi_st,candi_ed) not in nps_set:
                         continue
+                    assert candi_ed < zp_index
                     new_zp_inst['resolution'].append((candi_st,candi_ed))
                     candi_char_st = get_char_idx(idxs, candi_st, is_last_char=False)
                     candi_char_ed = get_char_idx(idxs, candi_ed, is_last_char=True)
+                    assert candi_char_ed < zp_char_index
                     new_zp_inst['resolution_char'].append((candi_char_st,candi_char_ed))
                 data_zp_info.append(new_zp_inst)
         idxs.append([len(toks)])
