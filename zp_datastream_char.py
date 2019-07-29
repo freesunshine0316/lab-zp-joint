@@ -10,6 +10,9 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
     print("zp_datastream_char.py: for model_type 'bert_char', 'char2word' not in use")
     data = json.load(open(path, 'r'))
 
+    if data_type == 'resolution':
+        assert len(data['sentences_nps']) == len(data['sentences_bert_toks'])
+
     features = []
     sent_id_mapping = {}
     right, total = 0.0, 0.0
@@ -45,11 +48,11 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
 
 
 def extract_resolution(data, features, sent_id_mapping, is_goldtree=True):
-    for feat in features:
-        input_ids = feat['input_ids']
-        feat['input_nps'] = [] # [SET of span]
-        feat['input_zp'] = [0 for _ in input_ids] # [seq]
-        feat['input_zp_span'] = [[(0,0),] for _ in input_ids] # [seq, list of span]
+    for i in range(len(features)):
+        input_ids = features[i]['input_ids']
+        features[i]['input_nps'] = [] # [SET of span]
+        features[i]['input_zp'] = [0 for _ in input_ids] # [seq]
+        features[i]['input_zp_span'] = [[(0,0),] for _ in input_ids] # [seq, list of span]
 
     for i, sent_nps in enumerate(data['sentences_nps']):
         if i not in sent_id_mapping:
@@ -57,6 +60,9 @@ def extract_resolution(data, features, sent_id_mapping, is_goldtree=True):
         i = sent_id_mapping[i]
         features[i]['input_nps'] = set(tuple(x['span_char']) for x in sent_nps)
         features[i]['input_nps'].add((0,0)) # add (0,0) NP as None category
+        #for st_char, ed_char in features[i]['input_nps']:
+        #    assert features[i]['input_decision_mask'][st_char] == 1
+        #    assert features[i]['input_decision_mask'][ed_char] == 1
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -66,13 +72,22 @@ def extract_resolution(data, features, sent_id_mapping, is_goldtree=True):
         i = sent_id_mapping[i]
         features[i]['input_zp'][j_char] = 1
         for k, (st_char, ed_char) in enumerate(zp_inst['resolution_char']):
+            assert (st_char,ed_char) != (0,0)
             if is_goldtree:
                 assert (st_char,ed_char) in features[i]['input_nps']
-            assert features[i]['input_decision_mask'][st_char] == 1
-            assert features[i]['input_decision_mask'][ed_char] == 1
+            #assert features[i]['input_decision_mask'][st_char] == 1
+            #assert features[i]['input_decision_mask'][ed_char] == 1
             if features[i]['input_zp_span'][j_char][-1] == (0,0):
                 features[i]['input_zp_span'][j_char].pop()
             features[i]['input_zp_span'][j_char].append((st_char,ed_char))
+
+    #right, total = 0.0, 0.0
+    #for i in range(len(features)):
+    #    for j_char in range(len(features[i]['input_zp_span'])):
+    #        if features[i]['input_zp'][j_char]:
+    #            total += 1.0
+    #            right += (0,0) not in features[i]['input_zp_span'][j_char]
+    #print('ana zp/zp: {}, {}, {}'.format(right/total, right, total))
 
 
 def extract_recovery(data, features, sent_id_mapping):
