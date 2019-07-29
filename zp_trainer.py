@@ -55,14 +55,17 @@ def add_counts_resolution(out, multiref, counts):
 # With NP information, we only consider the NPs before zp_index
 def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, counts):
     best_score = 0.0
-    best_np = (0,0)
+    best_np = None
+    has_ref = False
     for (st,ed) in nps:
-        if ed != 0 and ed > zp_index:
-            break
+        if ed >= zp_index:
+            continue
+        has_ref |= (st,ed) in multiref
         cur_score = out_st_dist[st].item() * out_ed_dist[ed].item()
         if cur_score > best_score:
             best_score = cur_score
             best_np = (st,ed)
+    assert has_ref
     add_counts_resolution(best_np, multiref, counts)
 
 
