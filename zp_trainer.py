@@ -152,7 +152,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
         log_file.write('Loss: %.2f, time: %.3f sec\n' % (total_loss, duration))
         det_pr, det_rc, det_f1 = calc_f1(n_out=dev_counts['detection'][1],
                 n_ref=dev_counts['detection'][2], n_both=dev_counts['detection'][0])
-        decision_print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
+        #print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
         log_file.write('Detection F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*det_f1, 100*det_pr, 100*det_rc))
         cur_result = {'data_type':data_type, 'loss':total_loss, 'detection_f1':det_f1}
         if data_type == 'recovery':
