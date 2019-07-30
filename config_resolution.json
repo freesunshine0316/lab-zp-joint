@@ -1,5 +1,5 @@
 {
-    "train_path": ["data/ontonotes_dev.json_v2"],
+    "train_path": ["data/ontonotes_train.json_v2"],
     "train_type": ["resolution"],
     "dev_path": ["data/ontonotes_dev.json_v2"],
     "dev_type": ["resolution"],

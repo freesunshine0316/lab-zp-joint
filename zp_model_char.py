@@ -20,7 +20,7 @@ class BertZP(BertPreTrainedModel):
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
 
-    def forward(self, input_ids, mask, decision_mask,
+    def forward(self, input_ids, mask, decision_mask, word_boundary_mask,
             detection_refs, resolution_refs, recovery_refs, batch_type):
         char_repre, _ = self.bert(input_ids, None, mask, output_all_encoded_layers=False)
         char_repre = self.dropout(char_repre) # [batch, seq, dim]
@@ -35,7 +35,7 @@ class BertZP(BertPreTrainedModel):
         #resolution
         if batch_type == 'resolution':
             # both are [batch, seq, seq]
-            resolution_start_dist, resolution_end_dist = self.resolution_classifier(char_repre, decision_mask)
+            resolution_start_dist, resolution_end_dist = self.resolution_classifier(char_repre, word_boundary_mask)
             resolution_start_outputs = resolution_start_dist.argmax(dim=-1) # [batch, seq]
             resolution_end_outputs = resolution_end_dist.argmax(dim=-1) # [batch, seq]
             resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, seq, 2]
@@ -74,11 +74,11 @@ def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, n
     return loss_fct(active_logits, active_refs)
 
 
-# logits: [batch, seq, seq]
+# dist: [batch, seq, seq]
 # refs: [batch, seq, seq]
 # masks: [batch, seq]
 def token_classification_loss_v2(dist, refs, masks):
-    loss = torch.sum(dist.log()*refs.float(), dim=-1) # [batch, seq]
+    loss = torch.sum(dist.log() * refs.float(), dim=-1) # [batch, seq]
     num_tokens = torch.sum(masks).item()
     assert num_tokens > 1
     return -1.0 * torch.sum(loss * masks) / num_tokens

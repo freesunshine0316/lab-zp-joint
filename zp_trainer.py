@@ -44,7 +44,7 @@ def add_counts(out, ref, counts):
 def add_counts_resolution(out, multiref, counts):
     assert type(multiref) is set
     out = tuple(out)
-    if sum(out) != 0:
+    if out != (0,0):
         counts[1] += 1.0
     if (0,0) not in multiref:
         counts[2] += 1.0
@@ -56,16 +56,13 @@ def add_counts_resolution(out, multiref, counts):
 def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, counts):
     best_score = 0.0
     best_np = None
-    has_ref = False
     for (st,ed) in nps:
         if ed >= zp_index:
             continue
-        has_ref |= (st,ed) in multiref
         cur_score = out_st_dist[st].item() * out_ed_dist[ed].item()
         if cur_score > best_score:
             best_score = cur_score
             best_np = (st,ed)
-    assert has_ref
     add_counts_resolution(best_np, multiref, counts)
 
 
@@ -110,7 +107,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             else:
                 input_zp_span = batch['input_zp_span_multiref']
                 resolution_out = step_out['resolution_outputs'].cpu().tolist() # [batch, seq, 2]
-            # generate mask and lenghts
+            # generate decision mask and lenghts
             if model_type == 'bert_char': # if char-level model
                 mask = batch['input_decision_mask']
                 lens = batch['input_mask'].sum(dim=-1).long()
@@ -155,7 +152,7 @@ def dev_eval(model, model_type, development_sets, device, log_file):
         log_file.write('Loss: %.2f, time: %.3f sec\n' % (total_loss, duration))
         det_pr, det_rc, det_f1 = calc_f1(n_out=dev_counts['detection'][1],
                 n_ref=dev_counts['detection'][2], n_both=dev_counts['detection'][0])
-        #print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
+        decision_print('Detection F1: %.2f, Precision: %.2f, Recall: %.2f' % (100*det_f1, 100*det_pr, 100*det_rc))
         log_file.write('Detection F1: %.2f, Precision: %.2f, Recall: %.2f\n' % (100*det_f1, 100*det_pr, 100*det_rc))
         cur_result = {'data_type':data_type, 'loss':total_loss, 'detection_f1':det_f1}
         if data_type == 'recovery':
@@ -195,12 +192,12 @@ def forward_step(model, model_type, batch):
         loss, outputs = model(input_ids, input_mask, input_wordmask, input_char2word, input_char2word_mask,
                 input_zp, input_zp_span, input_zp_cid, batch_type)
     elif model_type == 'bert_char':
-        input_ids, input_mask, input_decision_mask = \
-                batch['input_ids'], batch['input_mask'], batch['input_decision_mask']
+        input_ids, input_mask, input_decision_mask, input_word_boundary_mask = \
+                batch['input_ids'], batch['input_mask'], batch['input_decision_mask'], batch['input_word_boundary_mask']
         input_zp, input_zp_cid, input_zp_span, batch_type = \
                 batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['type']
 
-        loss, outputs = model(input_ids, input_mask, input_decision_mask,
+        loss, outputs = model(input_ids, input_mask, input_decision_mask, input_word_boundary_mask,
                 input_zp, input_zp_span, input_zp_cid, batch_type)
     else:
         assert False, "model_type '{}' not supported".format(model_type)
