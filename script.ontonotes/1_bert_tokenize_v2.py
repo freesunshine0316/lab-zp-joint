@@ -40,18 +40,22 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
     data = json.load(open(path, 'r'))
     data['sentences_bert_toks'] = [] # [batch, A1 A2 A3 B1 B2 C1 C2 ...]
     data['sentences_bert_idxs'] = [] # [batch, [0, 1, 2], [3, 4], [5, 6] ...]
-    data['sentences_nps'] = []
+    data['sentences_nps'] = [] # [batch, list of NPs]
+    data['sentences_decision_start'] = [] # [batch]
     data_zp_info = []
-    for i in range(0, len(data['sentences'])-2): # each instance, most left point
+    for i in range(0, len(data['sentences'])): # each instance, right most point
         idxs = [[0],]
         toks = ['[CLS]',]
         nps = []
         nps_set = {}
-        offset = 1
         all_offsets = {}
-        for j in range(i, i+3):
+        # window size: 3-sentence
+        # handle the special cases of first and first two sentences
+        for j in range(max(i-2,0), i+1):
             offset = len(idxs)
             all_offsets[j] = offset
+            if j == i:
+                data['sentences_decision_start'].append(offset)
             for word in data['sentences'][j].split():
                 idxs.append([])
                 for char in tokenizer.tokenize(word):
@@ -67,6 +71,9 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
                 nps_set[(st,ed)] = len(nps)-1
             if str(j) not in data['zp_info']:
                 data['zp_info'][str(j)] = []
+            # only process the ZP info for the last sentence
+            if j < i:
+                continue
             for zp_inst in data['zp_info'][str(j)]:
                 zp_index = zp_inst['zp_index']+offset
                 zp_char_index = get_char_idx(idxs, zp_index, is_last_char=False)
@@ -75,9 +82,7 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
                 for candi_sent_index, candi_st, candi_ed in zp_inst['ana_spans']:
                     # data_builder has the [-2,0] constraint,
                     # here only make sure candi and zp are in the same instance
-                    assert candi_sent_index <= j
-                    if candi_sent_index < i:
-                        continue
+                    assert max(i-2,0) <= candi_sent_index <= j
                     candi_offset = all_offsets[candi_sent_index]
                     candi_st, candi_ed = candi_st+candi_offset, candi_ed+candi_offset
                     assert (candi_st,candi_ed) != (0,0)
@@ -98,9 +103,8 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
         data['sentences_nps'].append(nps)
     del data['sentences']
     del data['nps']
-    print(len(data_zp_info))
     data['zp_info'] = data_zp_info
-    assert len(data['sentences_nps']) == len(data['sentences_bert_toks'])
+    assert len(data['sentences_nps']) == len(data['sentences_bert_toks']) == len(data['sentences_decision_start'])
 
     outpath = path.replace('_v2', '')
     if split_every > 0:
