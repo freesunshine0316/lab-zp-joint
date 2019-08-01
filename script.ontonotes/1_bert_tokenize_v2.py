@@ -118,8 +118,8 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
 ################################
 
 tokenizer = BasicTokenizer()
-process('test_data.json_v2', tokenizer)
-process('train_data.json_v2', tokenizer, split_every=5)
-#process('test_data.json_v2_autotree', tokenizer)
+#process('test_data.json_v2', tokenizer)
+#process('train_data.json_v2', tokenizer, split_every=5)
+process('test_data.json_v2_autotree', tokenizer)
 
 
