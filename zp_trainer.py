@@ -97,8 +97,8 @@ def dev_eval(model, model_type, development_sets, device, log_file):
             for k,v in step_loss.items():
                 dev_loss[k] += v.item() if type(v) == torch.Tensor else v
             # generate outputs
-            input_zp, input_zp_cid, input_zp_span, input_ci2wi = \
-                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span'], batch['input_ci2wi']
+            input_zp, input_zp_cid, input_zp_span = \
+                    batch['input_zp'], batch['input_zp_cid'], batch['input_zp_span']
             input_zp = input_zp.cpu().tolist()
             detection_out = step_out['detection_outputs'].cpu().tolist()
             if data_type == 'recovery':
@@ -138,12 +138,6 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                                     nps=batch['input_nps'][i],
                                     multiref=input_zp_span[i][j],
                                     counts=dev_counts['resolution_nps'])
-                        #out = resolution_out[i][j]
-                        #out = input_ci2wi[i][out[0]], input_ci2wi[i][out[1]]
-                        #ref = input_zp_span[i][j]
-                        #ref = input_ci2wi[i][ref[0]], input_ci2wi[i][ref[1]]
-                        #add_counts_bow(out=out, ref=ref,
-                        #        counts=dev_counts['resolution_bow'])
                 N += B
         # output and calculate performance
         total_loss = dev_loss['total_loss']
@@ -204,36 +198,36 @@ def forward_step(model, model_type, batch):
     return loss, outputs
 
 
-def training_data_scaling_unused(FLAGS, range_ends):
-    assert FLAGS.is_balanced_sampling in ('none', 'up', 'down')
-    if FLAGS.is_balanced_sampling == 'none':
-        return list(range(0, range_ends[-1]))
-    max_size, min_size = 0, 10000000
-    st = 0
-    for ed in range_ends:
-        min_size = min(min_size, ed - st)
-        max_size = max(max_size, ed - st)
-        st = ed
-
-    batch_ids = []
-    if FLAGS.is_balanced_sampling == 'down':
-        st = 0
-        for ed in range_ends:
-            if ed - st > min_size:
-                batch_ids += random.sample(range(st,ed), min_size)
-            else:
-                batch_ids += list(range(st,ed))
-            st = ed
-        return batch_ids
-    else:
-        st = 0
-        for ed in range_ends:
-            if ed - st < max_size:
-                batch_ids += random.choices(range(st,ed), max_size)
-            else:
-                batch_ids += list(range(st,ed))
-            st = ed
-        return batch_ids
+#def training_data_scaling_unused(FLAGS, range_ends):
+#    assert FLAGS.is_balanced_sampling in ('none', 'up', 'down')
+#    if FLAGS.is_balanced_sampling == 'none':
+#        return list(range(0, range_ends[-1]))
+#    max_size, min_size = 0, 10000000
+#    st = 0
+#    for ed in range_ends:
+#        min_size = min(min_size, ed - st)
+#        max_size = max(max_size, ed - st)
+#        st = ed
+#
+#    batch_ids = []
+#    if FLAGS.is_balanced_sampling == 'down':
+#        st = 0
+#        for ed in range_ends:
+#            if ed - st > min_size:
+#                batch_ids += random.sample(range(st,ed), min_size)
+#            else:
+#                batch_ids += list(range(st,ed))
+#            st = ed
+#        return batch_ids
+#    else:
+#        st = 0
+#        for ed in range_ends:
+#            if ed - st < max_size:
+#                batch_ids += random.choices(range(st,ed), max_size)
+#            else:
+#                batch_ids += list(range(st,ed))
+#            st = ed
+#        return batch_ids
 
 
 def main():
@@ -262,6 +256,24 @@ def main():
     print('Number of predefined pronouns: {}, they are: {}'.format(len(pro_mapping), pro_mapping.values()))
     log_file.write('Number of predefined pronouns: {}, they are: {}\n'.format(len(pro_mapping), pro_mapping.values()))
 
+    # ZP setting
+    is_gold_tree_test, is_only_azp = True, False
+    if not hasattr(FLAGS, 'zp_setting'):
+        FLAGS.zp_setting = 'normal'
+    if FLAGS.zp_setting == 'gold_azp':
+        is_only_azp = True
+    elif FLAGS.zp_setting == 'silver_azp':
+        is_gold_tree_test = False
+        is_only_azp = True
+    print('ZP setting: {}, is_gold_tree {}, is_only_azp {}'.format(FLAGS.zp_setting,
+        is_gold_tree_test, is_only_azp))
+
+    # no recovery sub-task for AZP only
+    if is_only_azp:
+        assert 'recovery' not in FLAGS.train_type and \
+                'recovery' not in FLAGS.dev_type and \
+                'recovery' not in FLAGS.test_type, 'No other data allowed under AZP-only setting'
+
     # load data and make_batches
     print('Loading data and making batches')
     train_instance_number = 0
@@ -269,9 +281,12 @@ def main():
     train_range_ends = []
     for path, data_type in zip(FLAGS.train_path, FLAGS.train_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type)
+                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=True, is_only_azp=is_only_azp)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
+        if is_only_azp: # no detection loss signal for AZP only
+            for bch in batches:
+                bch['input_zp'] = None
         train_instance_number += len(features)
         train_batches.extend(batches)
         train_range_ends.append(len(train_batches))
@@ -279,7 +294,7 @@ def main():
     devsets = []
     for path, data_type in zip(FLAGS.dev_path, FLAGS.dev_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type)
+                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=True, is_only_azp=is_only_azp)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         devsets.append({'data_type':data_type, 'batches':batches})
@@ -287,15 +302,15 @@ def main():
     testsets = []
     for path, data_type in zip(FLAGS.test_path, FLAGS.test_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type)
+                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=is_gold_tree_test, is_only_azp=is_only_azp)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         testsets.append({'data_type':data_type, 'batches':batches})
 
     print("Num training examples = {}".format(train_instance_number))
     print("Num training batches = {}".format(len(train_batches)))
-    print("Data option: is_shuffle {}, is_sort {}, is_balanced_sampling {}, is_batch_mix {}".format(FLAGS.is_shuffle,
-        FLAGS.is_sort, FLAGS.is_balanced_sampling, FLAGS.is_batch_mix))
+    print("Data option: is_shuffle {}, is_sort {}, is_batch_mix {}".format(FLAGS.is_shuffle,
+        FLAGS.is_sort, FLAGS.is_batch_mix))
 
     # create model
     print('Compiling model')
@@ -324,7 +339,7 @@ def main():
     best_f1 = 0.0
     finished_steps, finished_epochs = 0, 0
     # TODO: change rates
-    rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':2e-5}
+    rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':1e-5}
     model.train()
     while finished_steps < train_steps:
         epoch_start = time.time()
@@ -346,9 +361,6 @@ def main():
         if FLAGS.is_batch_mix:
             random.shuffle(train_batch_ids)
         for id in train_batch_ids:
-            #if finished_steps == 100:
-            #    finished_steps = 0
-            #    break
             ori_batch = train_batches[id]
             batch = {k: v.to(device) if type(v) == torch.Tensor else v \
                     for k, v in ori_batch.items()}

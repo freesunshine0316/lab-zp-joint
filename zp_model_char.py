@@ -29,6 +29,8 @@ class BertZP(BertPreTrainedModel):
         detection_logits = self.detection_classifier(char_repre) # [batch, seq, 2]
         detection_outputs = detection_logits.argmax(dim=-1) # [batch, seq]
         detection_loss = torch.tensor(0.0)
+        if torch.cuda.is_available():
+            detection_loss = detection_loss.cuda()
         if detection_refs is not None:
             detection_loss = token_classification_loss(detection_logits, 2, detection_refs, decision_mask)
 
@@ -40,13 +42,15 @@ class BertZP(BertPreTrainedModel):
             resolution_end_outputs = resolution_end_dist.argmax(dim=-1) # [batch, seq]
             resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, seq, 2]
             resolution_loss = torch.tensor(0.0)
+            if torch.cuda.is_available():
+                resolution_loss = resolution_loss.cuda()
             if resolution_refs is not None: # [batch, seq, seq, 2]
                 resolution_start_positions, resolution_end_positions = resolution_refs.split(1, dim=-1)
                 resolution_start_positions = resolution_start_positions.squeeze(dim=-1) # [batch, seq, seq]
                 resolution_end_positions = resolution_end_positions.squeeze(dim=-1) # [batch, seq, seq]
                 resolution_loss = span_loss(resolution_start_dist, resolution_end_dist,
                         resolution_start_positions, resolution_end_positions, decision_mask)
-                total_loss = detection_loss + resolution_loss
+            total_loss = detection_loss + resolution_loss
             return {'total_loss': total_loss, 'detection_loss': detection_loss, 'resolution_loss': resolution_loss}, \
                    {'detection_outputs': detection_outputs, 'resolution_outputs': resolution_outputs,
                     'resolution_start_dist': resolution_start_dist, 'resolution_end_dist': resolution_end_dist}
@@ -56,9 +60,11 @@ class BertZP(BertPreTrainedModel):
             recovery_logits = self.recovery_classifier(char_repre) # [batch, wordseq, pro_num]
             recovery_outputs = recovery_logits.argmax(dim=-1) # [batch, wordseq]
             recovery_loss = torch.tensor(0.0)
+            if torch.cuda.is_available():
+                recovery_loss = recovery_loss.cuda()
             if recovery_refs is not None:
                 recovery_loss = token_classification_loss(recovery_logits, self.pro_num, recovery_refs, decision_mask)
-                total_loss = detection_loss + recovery_loss
+            total_loss = detection_loss + recovery_loss
             return {'total_loss': total_loss, 'detection_loss': detection_loss, 'recovery_loss': recovery_loss}, \
                    {'detection_outputs': detection_outputs, 'recovery_outputs': recovery_outputs}
 
@@ -68,6 +74,11 @@ class BertZP(BertPreTrainedModel):
 def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, num_labels], scalar, [batch, 1]
     assert list(logits.size())[-1] == num_labels
     loss_fct = nn.CrossEntropyLoss()
+
+    num_tokens = torch.sum(masks).item()
+    if num_tokens == 0:
+        return 0.0 * loss_fct(logits.view(-1,num_labels), refs.view(-1))
+
     active_positions = masks.view(-1) == 1 # [batch*seq]
     active_logits = logits.view(-1,num_labels)[active_positions] # [batch*seq(sub), num_labels]
     active_refs = refs.view(-1)[active_positions] # [batch*seq(sub)]
@@ -80,8 +91,8 @@ def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, n
 def token_classification_loss_v2(dist, refs, masks):
     loss = torch.sum(dist.log() * refs.float(), dim=-1) # [batch, seq]
     num_tokens = torch.sum(masks).item()
-    assert num_tokens > 1
-    return -1.0 * torch.sum(loss * masks) / num_tokens
+    #assert num_tokens > 1
+    return -1.0 * torch.sum(loss * masks) / num_tokens if num_tokens > 0 else torch.sum(loss * 0.0)
 
 
 # start_dist: [batch, seq, seq]

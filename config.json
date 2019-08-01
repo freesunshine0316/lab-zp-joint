@@ -14,7 +14,6 @@
 
     "is_shuffle": false,
     "is_sort": true,
-    "is_balanced_sampling": "none",
     "is_batch_mix": true,
 
     "batch_size": 10,
@@ -26,5 +25,5 @@
 
     "char2word": "first",
     
-    "cuda_device": "1"
+    "cuda_device": "0"
 }

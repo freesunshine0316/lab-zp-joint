@@ -7,14 +7,14 @@
     "test_path": ["data/ontonotes_test.json_v2"],
     "test_type": ["resolution"],
     "log_dir": "logs",
-    "suffix": "dev_bertChar",
+    "suffix": "resolution_goldazp_bertChar",
     "model_type": "bert_char",
+    "zp_setting": "gold_azp",
     "pretrained_path": "bert-base-chinese",
     "pro_mapping": "data/pro_dict_rev.json",
 
     "is_shuffle": false,
     "is_sort": true,
-    "is_balanced_sampling": "none",
     "is_batch_mix": true,
 
     "batch_size": 10,
@@ -26,5 +26,5 @@
 
     "char2word": "first",
     
-    "cuda_device": "0"
+    "cuda_device": "1"
 }
