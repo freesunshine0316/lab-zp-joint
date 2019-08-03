@@ -75,7 +75,7 @@ def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, 
 #        counts[0] += max(ins_ed - ins_st + 1, 0)
 
 
-def dev_eval(model, model_type, development_sets, device, log_file):
+def dev_eval(model, model_type, development_sets, device, log_file, is_only_azp=False):
     model.eval()
     dev_eval_results = []
     for devset in development_sets:
@@ -132,7 +132,10 @@ def dev_eval(model, model_type, development_sets, device, log_file):
                                 counts=dev_counts['resolution'])
                         out_st_dist = step_out['resolution_start_dist'] # [batch, seq, seq]
                         out_ed_dist = step_out['resolution_end_dist'] # [batch, seq, seq]
-                        if input_zp[i][j]:
+                        # Eval based on NP if
+                        #      (1) not ZP only
+                        #      (2) ZP only and the current position is ZP
+                        if is_only_azp == False or (is_only_azp and input_zp[i][j]):
                             add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i,j],
                                     out_ed_dist=out_ed_dist[i,j],
                                     nps=batch['input_nps'][i],
@@ -259,12 +262,11 @@ def main():
     # ZP setting
     is_gold_tree_test, is_only_azp = True, False
     if not hasattr(FLAGS, 'zp_setting'):
-        FLAGS.zp_setting = 'normal'
-    if FLAGS.zp_setting == 'gold_azp':
+        FLAGS.zp_setting = 'gold_full'
+    if FLAGS.zp_setting == 'gold_azp': # only ZP resolution loss signal
         is_only_azp = True
-    elif FLAGS.zp_setting == 'silver_azp':
+    elif FLAGS.zp_setting == 'auto_full': # full loss signal
         is_gold_tree_test = False
-        is_only_azp = True
     print('ZP setting: {}, is_gold_tree {}, is_only_azp {}'.format(FLAGS.zp_setting,
         is_gold_tree_test, is_only_azp))
 
@@ -339,7 +341,7 @@ def main():
     best_f1 = 0.0
     finished_steps, finished_epochs = 0, 0
     # TODO: change rates
-    rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':1e-5}
+    rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':2e-5}
     model.train()
     while finished_steps < train_steps:
         epoch_start = time.time()
