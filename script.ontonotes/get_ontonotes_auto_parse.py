@@ -3,6 +3,7 @@ import os, sys, json
 
 from stanfordnlp.server import CoreNLPClient
 
+
 class PseudoRoot:
     def __init__(self):
         self.value = "TOP"
@@ -78,7 +79,7 @@ properties={"tokenize.language": "zh",
 }
 annotators=['tokenize', 'ssplit', 'pos', 'lemma', 'ner', 'parse']
 
-os.environ['CORENLP_HOME'] = '/home/lfsong/ws/servc.coref/stanford-corenlp-full-2018-10-05'
+os.environ['CORENLP_HOME'] = '/data/home/lfsong/ws/exp.dialogue_zp/data.OntoNotes50/data/stanford-corenlp-full-2018-10-05'
 with CoreNLPClient(properties=properties, annotators=annotators,
          endpoint="http://localhost:9091",
          timeout=60000, memory='16G', threads=8, output_format='serialized', be_quiet=False) as parser:

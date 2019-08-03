@@ -37,6 +37,7 @@ def get_char_idx(bert_idxs, j, is_last_char):
 # add [CLS] and [SEP] tokens for each sentece
 # update index information for zp_info
 def process(path, tokenizer, split_every=0, is_goldtree=True):
+    print('path {}, is_goldtree {}'.format(path, is_goldtree))
     data = json.load(open(path, 'r'))
     data['sentences_bert_toks'] = [] # [batch, A1 A2 A3 B1 B2 C1 C2 ...]
     data['sentences_bert_idxs'] = [] # [batch, [0, 1, 2], [3, 4], [5, 6] ...]
@@ -120,6 +121,5 @@ def process(path, tokenizer, split_every=0, is_goldtree=True):
 tokenizer = BasicTokenizer()
 #process('test_data.json_v2', tokenizer)
 #process('train_data.json_v2', tokenizer, split_every=5)
-process('test_data.json_v2_auto', tokenizer)
-
+process('test_data.json_v2_auto', tokenizer, is_goldtree=False)
 
