@@ -168,7 +168,7 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
                         assert ed_char < j
                 if (0,0) in input_zp_span_multiref[i][j]:
                     assert len(input_zp_span_multiref[i][j]) == 1
-                assert (input_zp_span_multiref[i][j] & input_nps[i]) == input_zp_span_multiref[i][j]
+                #assert (input_zp_span_multiref[i][j] & input_nps[i]) == input_zp_span_multiref[i][j]
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
