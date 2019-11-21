@@ -52,7 +52,7 @@ class BertZP(BertPreTrainedModel):
                         resolution_start_positions, resolution_end_positions, decision_mask)
             total_loss = detection_loss + resolution_loss
             return {'total_loss': total_loss, 'detection_loss': detection_loss, 'resolution_loss': resolution_loss}, \
-                   {'detection_outputs': detection_outputs, 'resolution_outputs': resolution_outputs,
+                  {'detection_outputs': detection_outputs, 'resolution_outputs': resolution_outputs,
                     'resolution_start_dist': resolution_start_dist, 'resolution_end_dist': resolution_end_dist}
 
         #recovery

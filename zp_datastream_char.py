@@ -6,12 +6,18 @@ import torch
 
 def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recovery",
         is_gold_tree=True, is_only_azp=False):
-    assert data_type in ("recovery", "resolution")
+    data = json.load(open(path, 'r'))
+    return extract_features(data, tokenizer, char2word=char2word, data_type=data_type,
+            is_gold_tree=is_gold_tree, is_only_azp=is_only_azp)
+
+
+def extract_features(data, tokenizer, char2word="sum", data_type="recovery",
+        is_gold_tree=True, is_only_azp=False):
+    assert data_type.startswith("recovery") or data_type.startswith("resolution")
     print('Data type: {}, char2word: {}'.format(data_type, char2word))
     print("zp_datastream_char.py: for model_type 'bert_char', 'char2word' not in use")
-    data = json.load(open(path, 'r'))
 
-    if data_type == 'resolution':
+    if data_type.startswith('resolution'):
         assert len(data['sentences_nps']) == len(data['sentences_bert_toks'])
 
     features = []
@@ -26,11 +32,12 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
         total += len(sent_bert_toks)
         input_ids = tokenizer.convert_tokens_to_ids(sent_bert_toks) # [seq]
         # Example: sent_bert_idxs: [0] [1, 2, 3] [4]; sent_bert_toks: [CLS] A B C [SEP]; decision_start: 1
-        # input_decision_mask = [0, 1, 0, 1, 1]
+        # input_decision_mask = [0, 1, 0, 0, 1]
         # input_word_boundary_mask = [1, 1, 0, 1, 1]
         decision_start = data['sentences_decision_start'][i] if 'sentences_decision_start' in data else 0
         input_decision_mask = []
         input_word_boundary_mask = []
+        char2word = {}
         for j, idxs in enumerate(sent_bert_idxs):
             curlen = len(input_decision_mask)
             input_decision_mask.extend([0 for _ in idxs])
@@ -39,36 +46,45 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
             input_word_boundary_mask.extend([0 for _ in idxs])
             input_word_boundary_mask[curlen] = 1
             input_word_boundary_mask[-1] = 1
+            char2word.update({k:j for k in idxs})
         assert len(input_ids) == len(input_decision_mask) == len(input_word_boundary_mask)
-        features.append({'input_ids':input_ids,
+        features.append({'input_ids':input_ids, 'char2word':char2word,
             'input_decision_mask':input_decision_mask, 'input_word_boundary_mask':input_word_boundary_mask})
         sent_id_mapping[i] = len(features) - 1
     print('OOV rate: {}, {}/{}'.format(right/total, right, total))
 
-    if data_type == 'recovery':
-        extract_recovery(data, features, sent_id_mapping)
-    else:
+    is_inference = data_type.find('inference') >= 0
+    if data_type.startswith('recovery'):
+        extract_recovery(data, features, sent_id_mapping,
+                is_inference=is_inference)
+    elif data_type.startswith('resolution'):
         extract_resolution(data, features, sent_id_mapping,
-                is_gold_tree=is_gold_tree, is_only_azp=is_only_azp)
+                is_inference=is_inference, is_gold_tree=is_gold_tree, is_only_azp=is_only_azp)
+    else:
+        assert False, 'Unknown'
 
     return features
 
 
-def extract_resolution(data, features, sent_id_mapping, is_gold_tree=True, is_only_azp=False):
-    for i in range(len(features)):
-        input_ids = features[i]['input_ids']
-        features[i]['input_zp'] = [0 for _ in input_ids] # [seq]
-        features[i]['input_zp_span'] = [[(0,0),] for _ in input_ids] # [seq, list of span]
-
+def extract_resolution(data, features, sent_id_mapping, is_inference=False, is_gold_tree=True, is_only_azp=False):
     for i, sent_nps in enumerate(data['sentences_nps']):
         if i not in sent_id_mapping:
             continue
         i = sent_id_mapping[i]
         features[i]['input_nps'] = set(tuple(x['span_char']) for x in sent_nps)
         features[i]['input_nps'].add((0,0)) # add (0,0) NP as None category
-        #for st_char, ed_char in features[i]['input_nps']:
-        #    assert features[i]['input_word_boundary_mask'][st_char] == 1
-        #    assert features[i]['input_word_boundary_mask'][ed_char] == 1
+        for st_char, ed_char in features[i]['input_nps']:
+            assert features[i]['input_word_boundary_mask'][st_char] == 1
+            assert features[i]['input_word_boundary_mask'][ed_char] == 1
+
+    if is_inference:
+        return
+
+    for i in range(len(features)):
+        input_ids = features[i]['input_ids']
+        features[i]['input_zp'] = [0 for _ in input_ids] # [seq]
+        features[i]['input_zp_span'] = [[(0,0),] for _ in input_ids] # [seq, list of span]
+
 
     for zp_inst in data['zp_info']:
         i, j_char = zp_inst['zp_sent_index'], zp_inst['zp_char_index']
@@ -104,7 +120,10 @@ def extract_resolution(data, features, sent_id_mapping, is_gold_tree=True, is_on
     #print('ana zp/zp: {}, {}, {}'.format(right/total, right, total))
 
 
-def extract_recovery(data, features, sent_id_mapping):
+def extract_recovery(data, features, sent_id_mapping, is_inference=False):
+    if is_inference:
+        return
+
     for inst in features:
         input_ids = inst['input_ids']
         inst['input_zp'] = [0 for _ in input_ids] # [seq]
@@ -123,14 +142,19 @@ def extract_recovery(data, features, sent_id_mapping):
 
 
 def make_batch(data_type, features, batch_size, is_sort=True, is_shuffle=False):
-    assert data_type in ("recovery", "resolution")
-    if data_type == "recovery":
-        return make_recovery_batch(features, batch_size, is_sort=is_sort, is_shuffle=is_shuffle)
+    assert data_type.startswith("recovery") or data_type.startswith("resolution")
+    is_inference = data_type.find('inference') >= 0
+    if data_type.startswith("recovery"):
+        return make_recovery_batch(features, batch_size,
+                is_inference=is_inference, is_sort=is_sort, is_shuffle=is_shuffle)
+    elif data_type.startswith("resolution"):
+        return make_resolution_batch(features, batch_size,
+                is_inference=is_inference, is_sort=is_sort, is_shuffle=is_shuffle)
     else:
-        return make_resolution_batch(features, batch_size, is_sort=is_sort, is_shuffle=is_shuffle)
+        assert False, 'Unknown'
 
 
-def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
+def make_resolution_batch(features, batch_size, is_inference=False, is_sort=True, is_shuffle=False):
     if is_sort:
         features.sort(key=lambda x: len(x['input_ids']))
     elif is_shuffle:
@@ -146,47 +170,52 @@ def make_resolution_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_mask = np.zeros([B, maxseq], dtype=np.float)
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_word_boundary_mask = np.zeros([B, maxseq], dtype=np.float)
-        input_zp = np.zeros([B, maxseq], dtype=np.long)
-        input_zp_span = np.zeros([B, maxseq, maxseq, 2], dtype=np.float)
-        input_zp_span_multiref = [[] for i in range(0, B)] # [batch, seq, SET of spans]
         input_nps = [features[N+i]['input_nps'] for i in range(0, B)] # [batch, SET of spans]
+        if is_inference == False:
+            input_zp = np.zeros([B, maxseq], dtype=np.long)
+            input_zp_span = np.zeros([B, maxseq, maxseq, 2], dtype=np.float)
+            input_zp_span_multiref = [[] for i in range(0, B)] # [batch, seq, SET of spans]
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']
             input_mask[i,:curseq] = [1,]*curseq
             input_decision_mask[i,:curseq] = features[N+i]['input_decision_mask']
             input_word_boundary_mask[i,:curseq] = features[N+i]['input_word_boundary_mask']
-            input_zp[i,:curseq] = features[N+i]['input_zp']
-            input_zp_span_multiref[i] = [set() for j in range(0, curseq)]
-            for j in range(0, curseq):
-                span_num = len(features[N+i]['input_zp_span'][j])
-                for st_char, ed_char in features[N+i]['input_zp_span'][j]:
-                    input_zp_span[i,j,st_char,0] = 1.0/span_num
-                    input_zp_span[i,j,ed_char,1] = 1.0/span_num
-                    input_zp_span_multiref[i][j].add((st_char,ed_char))
-                    if (st_char,ed_char) != (0,0):
-                        assert ed_char < j
-                if (0,0) in input_zp_span_multiref[i][j]:
-                    assert len(input_zp_span_multiref[i][j]) == 1
-                #assert (input_zp_span_multiref[i][j] & input_nps[i]) == input_zp_span_multiref[i][j]
+            if is_inference == False:
+                input_zp[i,:curseq] = features[N+i]['input_zp']
+                input_zp_span_multiref[i] = [set() for j in range(0, curseq)]
+                for j in range(0, curseq):
+                    span_num = len(features[N+i]['input_zp_span'][j])
+                    for st_char, ed_char in features[N+i]['input_zp_span'][j]:
+                        input_zp_span[i,j,st_char,0] = 1.0/span_num
+                        input_zp_span[i,j,ed_char,1] = 1.0/span_num
+                        input_zp_span_multiref[i][j].add((st_char,ed_char))
+                        if (st_char,ed_char) != (0,0):
+                            assert ed_char < j
+                    if (0,0) in input_zp_span_multiref[i][j]:
+                        assert len(input_zp_span_multiref[i][j]) == 1
+                    #assert (input_zp_span_multiref[i][j] & input_nps[i]) == input_zp_span_multiref[i][j]
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
         input_word_boundary_mask = torch.tensor(input_word_boundary_mask, dtype=torch.float)
-        input_zp = torch.tensor(input_zp, dtype=torch.long)
-        input_zp_span = torch.tensor(input_zp_span, dtype=torch.float)
+        if is_inference == False:
+            input_zp = torch.tensor(input_zp, dtype=torch.long)
+            input_zp_span = torch.tensor(input_zp_span, dtype=torch.float)
+        else:
+            input_zp = input_zp_span = input_zp_span_multiref = None
 
 
-        batches.append({'input_ids':input_ids, 'input_mask':input_mask,
+        batches.append({'input_ids':input_ids, 'input_mask':input_mask, 'input_nps':input_nps, 'type':'resolution',
             'input_decision_mask':input_decision_mask, 'input_word_boundary_mask': input_word_boundary_mask,
             'input_zp':input_zp, 'input_zp_cid':None, 'input_zp_span':input_zp_span,
-            'input_nps':input_nps, 'type':'resolution',
+            'char2word':[features[N+i]['char2word'] for i in range(0, B)],
             'input_zp_span_multiref': input_zp_span_multiref})
         N += B
     return batches
 
 
-def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
+def make_recovery_batch(features, batch_size, is_inference=False, is_sort=True, is_shuffle=False):
     if is_sort:
         features.sort(key=lambda x: len(x['input_ids']))
     elif is_shuffle:
@@ -202,22 +231,27 @@ def make_recovery_batch(features, batch_size, is_sort=True, is_shuffle=False):
         input_mask = np.zeros([B, maxseq], dtype=np.float)
         input_decision_mask = np.zeros([B, maxseq], dtype=np.float)
         input_word_boundary_mask = np.zeros([B, maxseq], dtype=np.float)
-        input_zp = np.zeros([B, maxseq], dtype=np.long)
-        input_zp_cid = np.zeros([B, maxseq], dtype=np.long)
+        if is_inference == False:
+            input_zp = np.zeros([B, maxseq], dtype=np.long)
+            input_zp_cid = np.zeros([B, maxseq], dtype=np.long)
         for i in range(0, B):
             curseq = len(features[N+i]['input_ids'])
             input_ids[i,:curseq] = features[N+i]['input_ids']
             input_mask[i,:curseq] = [1,]*curseq
             input_decision_mask[i,:curseq] = features[N+i]['input_decision_mask']
             input_word_boundary_mask[i,:curseq] = features[N+i]['input_word_boundary_mask']
-            input_zp[i,:curseq] = features[N+i]['input_zp']
-            input_zp_cid[i,:curseq] = features[N+i]['input_zp_cid']
+            if is_inference == False:
+                input_zp[i,:curseq] = features[N+i]['input_zp']
+                input_zp_cid[i,:curseq] = features[N+i]['input_zp_cid']
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.float)
         input_decision_mask = torch.tensor(input_decision_mask, dtype=torch.float)
         input_word_boundary_mask = torch.tensor(input_word_boundary_mask, dtype=torch.float)
-        input_zp = torch.tensor(input_zp, dtype=torch.long)
-        input_zp_cid = torch.tensor(input_zp_cid, dtype=torch.long)
+        if is_inference == False:
+            input_zp = torch.tensor(input_zp, dtype=torch.long)
+            input_zp_cid = torch.tensor(input_zp_cid, dtype=torch.long)
+        else:
+            input_zp = input_zp_cid = None
 
 
         batches.append({'input_ids':input_ids, 'input_mask':input_mask,

@@ -75,7 +75,7 @@ def add_counts_resolution_np(zp_index, out_st_dist, out_ed_dist, nps, multiref, 
 #        counts[0] += max(ins_ed - ins_st + 1, 0)
 
 
-def dev_eval(model, model_type, development_sets, device, log_file, is_only_azp=False):
+def dev_eval(model, model_type, development_sets, device, log_file, is_only_azp_test=False):
     model.eval()
     dev_eval_results = []
     for devset in development_sets:
@@ -112,7 +112,7 @@ def dev_eval(model, model_type, development_sets, device, log_file, is_only_azp=
                 mask = batch['input_decision_mask']
                 lens = batch['input_mask'].sum(dim=-1).long()
             else:
-                mask = batch['input_wordmask']
+                mask = batch['input_decision_mask']
                 lens = batch['input_wordmask'].sum(dim=-1).long()
             # update counts for calculating F1
             B = list(lens.size())[0]
@@ -135,7 +135,7 @@ def dev_eval(model, model_type, development_sets, device, log_file, is_only_azp=
                         # Eval based on NP if
                         #      (1) not ZP only
                         #      (2) ZP only and the current position is ZP
-                        if is_only_azp == False or (is_only_azp and input_zp[i][j]):
+                        if is_only_azp_test == False or (is_only_azp_test and input_zp[i][j]):
                             add_counts_resolution_np(zp_index=j, out_st_dist=out_st_dist[i,j],
                                     out_ed_dist=out_ed_dist[i,j],
                                     nps=batch['input_nps'][i],
@@ -260,18 +260,23 @@ def main():
     log_file.write('Number of predefined pronouns: {}, they are: {}\n'.format(len(pro_mapping), pro_mapping.values()))
 
     # ZP setting
-    is_gold_tree_test, is_only_azp = True, False
+    is_only_azp_train, is_only_azp_test, is_gold_tree_test = False, False, True
     if not hasattr(FLAGS, 'zp_setting'):
         FLAGS.zp_setting = 'gold_full'
     if FLAGS.zp_setting == 'gold_azp': # only ZP resolution loss signal
-        is_only_azp = True
+        is_only_azp_train = True
     elif FLAGS.zp_setting == 'auto_full': # full loss signal
         is_gold_tree_test = False
-    print('ZP setting: {}, is_gold_tree {}, is_only_azp {}'.format(FLAGS.zp_setting,
-        is_gold_tree_test, is_only_azp))
+    elif FLAGS.zp_setting == 'auto_azp':
+        is_only_azp_train = True
+        is_gold_tree_test = False
+    else:
+        assert False, 'Unknown'
+    print('ZP setting: {}, is_only_azp_train {}, is_only_azp_test {}, is_gold_tree_test {}'.format(FLAGS.zp_setting,
+        is_only_azp_train, is_only_azp_test, is_gold_tree_test))
 
     # no recovery sub-task for AZP only
-    if is_only_azp:
+    if is_only_azp_train or is_only_azp_test:
         assert 'recovery' not in FLAGS.train_type and \
                 'recovery' not in FLAGS.dev_type and \
                 'recovery' not in FLAGS.test_type, 'No other data allowed under AZP-only setting'
@@ -283,10 +288,10 @@ def main():
     train_range_ends = []
     for path, data_type in zip(FLAGS.train_path, FLAGS.train_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=True, is_only_azp=is_only_azp)
+                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=True, is_only_azp=is_only_azp_train)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
-        if is_only_azp: # no detection loss signal for AZP only
+        if is_only_azp_train: # no detection loss signal for AZP only
             for bch in batches:
                 bch['input_zp'] = None
         train_instance_number += len(features)
@@ -296,7 +301,7 @@ def main():
     devsets = []
     for path, data_type in zip(FLAGS.dev_path, FLAGS.dev_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=True, is_only_azp=is_only_azp)
+                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=is_gold_tree_test, is_only_azp=is_only_azp_test)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         devsets.append({'data_type':data_type, 'batches':batches})
@@ -304,7 +309,7 @@ def main():
     testsets = []
     for path, data_type in zip(FLAGS.test_path, FLAGS.test_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=is_gold_tree_test, is_only_azp=is_only_azp)
+                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=is_gold_tree_test, is_only_azp=is_only_azp_test)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         testsets.append({'data_type':data_type, 'batches':batches})
@@ -404,7 +409,7 @@ def main():
         print('\nTraining loss: %s, time: %.3f sec' % (str(train_loss), duration))
         log_file.write('\nTraining loss: %s, time: %.3f sec\n' % (str(train_loss), duration))
         cur_f1 = []
-        for dev_result in dev_eval(model, FLAGS.model_type, devsets, device, log_file):
+        for dev_result in dev_eval(model, FLAGS.model_type, devsets, device, log_file, is_only_azp_test=False):
             if dev_result['data_type'] in FLAGS.dev_key_types:
                 cur_f1.append(dev_result['key_f1'])
         cur_f1 = np.mean(cur_f1)
@@ -415,7 +420,7 @@ def main():
             save_model(model, path_prefix)
         print('-------------')
         log_file.write('-------------\n')
-        dev_eval(model, FLAGS.model_type, testsets, device, log_file)
+        dev_eval(model, FLAGS.model_type, testsets, device, log_file, is_only_azp_test=False)
         print('=============')
         log_file.write('=============\n')
         if torch.cuda.is_available():

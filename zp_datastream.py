@@ -23,7 +23,6 @@ def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recov
         input_ids = tokenizer.convert_tokens_to_ids(sent_bert_toks) # [seq]
         # Example: sent_bert_idxs: [0] [1, 2, 3] [4]; sent_bert_toks: [CLS] A B C [SEP]; decision_start: 1
         # input_decision_mask = [0, 1, 0, 1, 1]
-        # input_word_boundary_mask = [1, 1, 0, 1, 1]
         decision_start = data['sentences_decision_start'][i] if 'sentences_decision_start' in data else 0
         input_decision_mask = []
         input_char2word = [] # [wordseq, wordlen OR 1]
