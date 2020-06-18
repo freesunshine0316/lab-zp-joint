@@ -4,15 +4,12 @@ import numpy as np
 import torch
 
 
-def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recovery",
-        is_gold_tree=True, is_only_azp=False):
+def load_and_extract_features(path, tokenizer, char2word="sum", data_type="recovery", is_only_azp=False):
     data = json.load(open(path, 'r'))
-    return extract_features(data, tokenizer, char2word=char2word, data_type=data_type,
-            is_gold_tree=is_gold_tree, is_only_azp=is_only_azp)
+    return extract_features(data, tokenizer, char2word=char2word, data_type=data_type, is_only_azp=is_only_azp)
 
 
-def extract_features(data, tokenizer, char2word="sum", data_type="recovery",
-        is_gold_tree=True, is_only_azp=False):
+def extract_features(data, tokenizer, char2word="sum", data_type="recovery", is_only_azp=False):
     assert data_type.startswith("recovery") or data_type.startswith("resolution")
     print('Data type: {}, char2word: {}'.format(data_type, char2word))
     print("zp_datastream_char.py: for model_type 'bert_char', 'char2word' not in use")
@@ -37,7 +34,7 @@ def extract_features(data, tokenizer, char2word="sum", data_type="recovery",
         decision_start = data['sentences_decision_start'][i] if 'sentences_decision_start' in data else 0
         input_decision_mask = []
         input_word_boundary_mask = []
-        char2word = {}
+        char2word_map = {}
         for j, idxs in enumerate(sent_bert_idxs):
             curlen = len(input_decision_mask)
             input_decision_mask.extend([0 for _ in idxs])
@@ -46,27 +43,25 @@ def extract_features(data, tokenizer, char2word="sum", data_type="recovery",
             input_word_boundary_mask.extend([0 for _ in idxs])
             input_word_boundary_mask[curlen] = 1
             input_word_boundary_mask[-1] = 1
-            char2word.update({k:j for k in idxs})
+            char2word_map.update({k:j for k in idxs})
         assert len(input_ids) == len(input_decision_mask) == len(input_word_boundary_mask)
-        features.append({'input_ids':input_ids, 'char2word':char2word,
+        features.append({'input_ids':input_ids, 'char2word':char2word_map,
             'input_decision_mask':input_decision_mask, 'input_word_boundary_mask':input_word_boundary_mask})
         sent_id_mapping[i] = len(features) - 1
     print('OOV rate: {}, {}/{}'.format(right/total, right, total))
 
     is_inference = data_type.find('inference') >= 0
     if data_type.startswith('recovery'):
-        extract_recovery(data, features, sent_id_mapping,
-                is_inference=is_inference)
+        extract_recovery(data, features, sent_id_mapping, is_inference=is_inference)
     elif data_type.startswith('resolution'):
-        extract_resolution(data, features, sent_id_mapping,
-                is_inference=is_inference, is_gold_tree=is_gold_tree, is_only_azp=is_only_azp)
+        extract_resolution(data, features, sent_id_mapping, is_inference=is_inference, is_only_azp=is_only_azp)
     else:
         assert False, 'Unknown'
 
     return features
 
 
-def extract_resolution(data, features, sent_id_mapping, is_inference=False, is_gold_tree=True, is_only_azp=False):
+def extract_resolution(data, features, sent_id_mapping, is_inference=False, is_only_azp=False):
     for i, sent_nps in enumerate(data['sentences_nps']):
         if i not in sent_id_mapping:
             continue
@@ -94,10 +89,10 @@ def extract_resolution(data, features, sent_id_mapping, is_inference=False, is_g
         i = sent_id_mapping[i]
         features[i]['input_zp'][j_char] = 1
         for k, (st_char, ed_char) in enumerate(zp_inst['resolution_char']):
-            assert (st_char,ed_char) != (0,0) # span can't be (0,0), which represents 'None' for resolution
+            assert (st_char,ed_char) != (0,0) # Resolution span can't be (0,0), which represents 'None'
             assert ed_char < j_char # Resolution span should be less than ZP-index
-            if is_gold_tree: # if gold tree, then span should be an NP
-                assert (st_char,ed_char) in features[i]['input_nps']
+            #if is_gold_tree: # if gold tree, then resolution span should be an NP
+            #    assert (st_char,ed_char) in features[i]['input_nps']
             #assert features[i]['input_word_boundary_mask'][st_char] == 1
             #assert features[i]['input_word_boundary_mask'][ed_char] == 1
             if features[i]['input_zp_span'][j_char][-1] == (0,0):
@@ -257,6 +252,7 @@ def make_recovery_batch(features, batch_size, is_inference=False, is_sort=True, 
         batches.append({'input_ids':input_ids, 'input_mask':input_mask,
             'input_decision_mask':input_decision_mask, 'input_word_boundary_mask': input_word_boundary_mask,
             'input_zp':input_zp, 'input_zp_cid':input_zp_cid, 'input_zp_span':None,
+            'char2word':[features[N+i]['char2word'] for i in range(0, B)],
             'type':'recovery'})
         N += B
     return batches

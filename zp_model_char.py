@@ -76,8 +76,11 @@ def token_classification_loss(logits, num_labels, refs, masks): # [batch, seq, n
     loss_fct = nn.CrossEntropyLoss()
 
     num_tokens = torch.sum(masks).item()
-    if num_tokens == 0:
-        return 0.0 * loss_fct(logits.view(-1,num_labels), refs.view(-1))
+    if int(num_tokens) == 0:
+        rst = torch.tensor(0.0)
+        if torch.cuda.is_available():
+            rst = rst.cuda()
+        return rst
 
     active_positions = masks.view(-1) == 1 # [batch*seq]
     active_logits = logits.view(-1,num_labels)[active_positions] # [batch*seq(sub), num_labels]

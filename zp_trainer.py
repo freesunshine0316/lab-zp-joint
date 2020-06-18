@@ -85,8 +85,8 @@ def dev_eval(model, model_type, development_sets, device, log_file, is_only_azp_
         print('Evaluating on dataset with data_type: {}'.format(data_type))
         N = 0
         dev_loss = {'total_loss':0.0, 'detection_loss':0.0, 'recovery_loss':0.0, 'resolution_loss':0.0}
-        dev_counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)], 'resolution':[0.0 for _ in range(3)],
-                      'resolution_nps':[0.0 for _ in range(3)]}
+        dev_counts = {'detection':[0.0 for _ in range(3)], 'recovery':[0.0 for _ in range(3)],
+                'resolution':[0.0 for _ in range(3)], 'resolution_nps':[0.0 for _ in range(3)]}
         start = time.time()
         for step, ori_batch in enumerate(batches):
             # execution
@@ -260,20 +260,16 @@ def main():
     log_file.write('Number of predefined pronouns: {}, they are: {}\n'.format(len(pro_mapping), pro_mapping.values()))
 
     # ZP setting
-    is_only_azp_train, is_only_azp_test, is_gold_tree_test = False, False, True
-    if not hasattr(FLAGS, 'zp_setting'):
-        FLAGS.zp_setting = 'gold_full'
-    if FLAGS.zp_setting == 'gold_azp': # only ZP resolution loss signal
+    is_only_azp_train, is_only_azp_test = False, False
+    if not hasattr(FLAGS, 'azp_setting'):
+        FLAGS.zp_setting = 'full'
+    if FLAGS.zp_setting == 'azp': # only ZP resolution loss signal
         is_only_azp_train = True
-    elif FLAGS.zp_setting == 'auto_full': # full loss signal
-        is_gold_tree_test = False
-    elif FLAGS.zp_setting == 'auto_azp':
-        is_only_azp_train = True
-        is_gold_tree_test = False
+        is_only_azp_test = True
     else:
         assert False, 'Unknown'
-    print('ZP setting: {}, is_only_azp_train {}, is_only_azp_test {}, is_gold_tree_test {}'.format(FLAGS.zp_setting,
-        is_only_azp_train, is_only_azp_test, is_gold_tree_test))
+    print('ZP setting: {}, is_only_azp_train {}, is_only_azp_test {}'.format(FLAGS.zp_setting,
+        is_only_azp_train, is_only_azp_test))
 
     # no recovery sub-task for AZP only
     if is_only_azp_train or is_only_azp_test:
@@ -288,7 +284,7 @@ def main():
     train_range_ends = []
     for path, data_type in zip(FLAGS.train_path, FLAGS.train_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=True, is_only_azp=is_only_azp_train)
+                char2word=FLAGS.char2word, data_type=data_type, is_only_azp=is_only_azp_train)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         if is_only_azp_train: # no detection loss signal for AZP only
@@ -301,7 +297,7 @@ def main():
     devsets = []
     for path, data_type in zip(FLAGS.dev_path, FLAGS.dev_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=is_gold_tree_test, is_only_azp=is_only_azp_test)
+                char2word=FLAGS.char2word, data_type=data_type, is_only_azp=is_only_azp_test)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         devsets.append({'data_type':data_type, 'batches':batches})
@@ -309,7 +305,7 @@ def main():
     testsets = []
     for path, data_type in zip(FLAGS.test_path, FLAGS.test_type):
         features = zp_datastream.load_and_extract_features(path, tokenizer,
-                char2word=FLAGS.char2word, data_type=data_type, is_gold_tree=is_gold_tree_test, is_only_azp=is_only_azp_test)
+                char2word=FLAGS.char2word, data_type=data_type, is_only_azp=is_only_azp_test)
         batches = zp_datastream.make_batch(data_type, features, FLAGS.batch_size,
                 is_sort=FLAGS.is_sort, is_shuffle=FLAGS.is_shuffle)
         testsets.append({'data_type':data_type, 'batches':batches})
@@ -345,25 +341,12 @@ def main():
 
     best_f1 = 0.0
     finished_steps, finished_epochs = 0, 0
-    # TODO: change rates
-    rates = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':2e-5}
+    ratios = {'detection_discount':0.1, 'recovery':8e-6, 'resolution':2e-5}
     model.train()
     while finished_steps < train_steps:
         epoch_start = time.time()
         train_loss = {'total_loss':0.0, 'detection_loss':0.0, 'recovery_loss':0.0, 'resolution_loss':0.0}
-
-        # TODO: modify the batch-id range
-        if finished_epochs < 1:
-            train_batch_ids = list(range(0, train_range_ends[-1]))
-        else:
-            train_batch_ids = list(range(0, train_range_ends[-1]))
-
-        # TODO: freeze bert parameters
-        if finished_epochs == 100:
-            print("!!!!!Freeze BERT parameters")
-            for param in model.bert.parameters():
-                param.requires_grad = False
-
+        train_batch_ids = list(range(0, train_range_ends[-1]))
         print('Current epoch takes {} steps'.format(len(train_batch_ids)))
         if FLAGS.is_batch_mix:
             random.shuffle(train_batch_ids)
@@ -376,15 +359,9 @@ def main():
             for k,v in step_loss.items():
                 train_loss[k] += v.item() if type(v) == torch.Tensor else v
 
-            # TODO: modify the loss type
+            # modify the loss type
             step_loss['total_loss'] = rates['detection_discount']*step_loss['detection_loss'] + step_loss['%s_loss'%batch['type']]
-            if finished_epochs < 1:
-                loss = step_loss['total_loss']
-                #loss = step_loss['%s_loss'%batch['type']]
-                #loss = step_loss['detection_loss']
-            else:
-                loss = step_loss['total_loss']
-                #loss = step_loss['%s_loss'%batch['type']]
+            loss = step_loss['total_loss']
 
             if n_gpu > 1:
                 loss = loss.mean()
@@ -392,7 +369,7 @@ def main():
                 loss = loss / FLAGS.grad_accum_steps
             loss.backward() # just calculate gradient
 
-            # TODO: adapt lr for batches of different types
+            # adapt lr for batches of different types
             for param_group in optimizer.param_groups:
                 param_group['lr'] = rates[batch['type']]
 
@@ -418,6 +395,8 @@ def main():
             log_file.write('Saving weights, F1 {} (prev_best) < {} (cur)\n'.format(best_f1, cur_f1))
             best_f1 = cur_f1
             save_model(model, path_prefix)
+            FLAGS.best_number = best_f1
+            config_utils.save_config(FLAGS, path_prefix + ".config.json")
         print('-------------')
         log_file.write('-------------\n')
         dev_eval(model, FLAGS.model_type, testsets, device, log_file, is_only_azp_test=False)

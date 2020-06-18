@@ -21,16 +21,17 @@ class BertZP(BertPreTrainedModel):
         self.recovery_classifier = nn.Linear(config.hidden_size, pro_num)
 
 
-    def forward(self, input_ids, mask, decision_mask, word_mask, input_char2word, input_char2word_mask,
+    def forward(self, input_ids, mask, decision_mask, word_boundary_mask, input_char2word, input_char2word_mask,
             detection_refs, resolution_refs, recovery_refs, batch_type):
         char_repre, _ = self.bert(input_ids, None, mask, output_all_encoded_layers=False)
         char_repre = self.dropout(char_repre) # [batch, seq, dim]
 
-        # cast from char-level to word-level
         batch_size, seq_num, hidden_dim = list(char_repre.size())
         _, wordseq_num, word_len = list(input_char2word.size())
         if self.char2word in ('first', 'last', ):
             assert word_len == 1
+
+        # cast from char-level to word-level
         offset = torch.arange(batch_size).view(batch_size, 1, 1).expand(-1, wordseq_num, word_len) * seq_num
         if torch.cuda.is_available():
             offset = offset.cuda()
@@ -38,8 +39,9 @@ class BertZP(BertPreTrainedModel):
         word_repre = torch.index_select(char_repre.contiguous().view(batch_size * seq_num, hidden_dim), 0, positions)
         word_repre = word_repre.view(batch_size, wordseq_num, word_len, hidden_dim)
         word_repre = word_repre * input_char2word_mask.unsqueeze(-1)
-        # word_repre: [batch, wordseq, dim]
-        word_repre = word_repre.mean(dim=2) if self.char2word == 'mean' else word_repre.sum(dim=2)
+        word_repre = word_repre.sum(dim=2) # [batch, wordseq, dim]
+        if self.char2word == 'mean':
+            word_repre /= input_char2word.sum(dim=2, keepdim=True)  # [batch, wordseq, 1]
 
         #detection
         detection_logits = self.detection_classifier(word_repre) # [batch, wordseq, 2]
@@ -52,7 +54,7 @@ class BertZP(BertPreTrainedModel):
 
         #resolution
         if batch_type == 'resolution':
-            resolution_start_dist, resolution_end_dist = self.resolution_classifier(word_repre, word_mask)
+            resolution_start_dist, resolution_end_dist = self.resolution_classifier(word_repre, word_boundary_mask)
             resolution_start_outputs = resolution_start_dist.argmax(dim=-1) # [batch, wordseq]
             resolution_end_outputs = resolution_end_dist.argmax(dim=-1) # [batch, wordseq]
             resolution_outputs = torch.stack([resolution_start_outputs, resolution_end_outputs], dim=-1) # [batch, wordseq, 2]
